@@ -41,9 +41,9 @@ async function testTurnConnectivity() {
     const testPc = new RTCPeerConnection({
       iceServers: [
         {
-          urls: ['turn:numb.viagenie.ca'],
-          username: 'webrtc@live.com',
-          credential: 'muazkh'
+          urls: ['turn:openrelay.metered.ca:80'],
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
       ]
     });
@@ -87,9 +87,6 @@ async function testTurnConnectivity() {
     console.error('❌ TURN connectivity test failed:', error);
   }
 }
-
-// Run TURN test on page load
-setTimeout(testTurnConnectivity, 1000);
 
 // Connect to WebSocket server
 function connectWebSocket() {
@@ -270,30 +267,33 @@ async function createPeerConnection(peerName) {
       { urls: 'stun:stun3.l.google.com:19302' },
       { urls: 'stun:stun4.l.google.com:19302' },
       
-      // Working free TURN servers for production
+      // More reliable TURN servers for production
       {
         urls: [
-          'turn:numb.viagenie.ca',
-          'turns:numb.viagenie.ca'
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:443',
+          'turns:openrelay.metered.ca:443'
         ],
-        username: 'webrtc@live.com',
-        credential: 'muazkh'
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
       },
       {
         urls: [
-          'turn:192.158.29.39:3478?transport=udp',
-          'turn:192.158.29.39:3478?transport=tcp'
+          'turn:relay1.expressturn.com:3478',
+          'turns:relay1.expressturn.com:5349'
         ],
-        username: '28224511:1379330808',
-        credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA='
+        username: 'efTAWWCKCIIQOHO273',
+        credential: 'hkfGEWuRo9awtUfV'
       },
       {
         urls: [
-          'turn:turn.bistri.com:80',
-          'turn:turn.anyfirewall.com:443?transport=tcp'
+          'turn:a.relay.metered.ca:80',
+          'turn:a.relay.metered.ca:80?transport=tcp',
+          'turn:a.relay.metered.ca:443',
+          'turns:a.relay.metered.ca:443'
         ],
-        username: 'homeo',
-        credential: 'homeo'
+        username: 'bc3a4f4e6b03b1ba6b97d654',
+        credential: 'dNSdH4GFXkmJMlVy'
       }
     ],
     iceCandidatePoolSize: 10,
@@ -631,6 +631,21 @@ function sendMovieSignal(type, data) {
 function requestMovieStateSync() {
   sendMovieSignal('request-video-state', { userName: userNameSignaling });
 }
+
+// Global function for sending WebSocket messages (for meeting.js compatibility)
+function sendWebSocketMessage(type, data) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      type: type,
+      ...data
+    }));
+  } else {
+    console.warn('WebSocket not connected, cannot send message:', type);
+  }
+}
+
+// Make function available globally
+window.sendWebSocketMessage = sendWebSocketMessage;
 
 // Export functions for movie party
 window.sendMovieSignal = sendMovieSignal;

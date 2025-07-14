@@ -93,11 +93,13 @@ function showEmojiOverlay(emoji) {
 }
 
 function broadcastMicStatus(muted) {
-  socket.emit('mic-status', {
-    roomId: roomCode,
-    name: userName,
-    muted
-  });
+  if (window.sendWebSocketMessage) {
+    window.sendWebSocketMessage('mic-status', {
+      roomId: roomCode,
+      name: userName,
+      muted
+    });
+  }
 }
 
 function toggleMic() {
@@ -380,8 +382,8 @@ function leaveMeeting() {
   }
 
   // 3. Inform server
-  if (socket && socket.connected) {
-    socket.disconnect();
+  if (window.socket && window.socket.readyState === WebSocket.OPEN) {
+    window.socket.close();
   }
 
   // 4. Clear session
