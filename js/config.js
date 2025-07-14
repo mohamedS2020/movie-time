@@ -5,7 +5,7 @@ const config = {
   },
   production: {
     // Update this with your actual Railway/server URL
-    SERVER_URL: 'https://your-actual-server-url.railway.app'
+    SERVER_URL: 'https://movie-time-production-370b.up.railway.app'
   }
 };
 
