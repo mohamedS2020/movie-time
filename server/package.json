@@ -1,0 +1,24 @@
+{
+  "name": "voice-meet-server",
+  "version": "1.0.0",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node signaling-server.js",
+    "dev": "node signaling-server.js",
+    "legacy": "node signaling-server.js",
+    "build": "echo 'No build step required'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["voice-meeting", "movie-party", "webrtc", "websocket"],
+  "author": "",
+  "license": "ISC",
+  "description": "Enhanced voice meeting server with movie party features (WebSocket based)",
+  "dependencies": {
+    "ws": "^8.18.3",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "mime-types": "^2.1.35"
+  }
+}

@@ -17,8 +17,6 @@ dist/
 .env.test.local
 .env.production.local
 
-# Vercel
-.vercel
 
 # IDE files
 .vscode/
@@ -39,5 +37,4 @@ Thumbs.db
 logs
 *.log
 
-# Server files (since we're separating them)
-server/
+
