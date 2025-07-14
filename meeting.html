@@ -1,0 +1,57 @@
+<!-- meeting.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🎙️ QuickVoice Meeting Room</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <script src="js/config.js"></script>
+</head>
+<body class="meeting-page">
+  <div class="meeting-container">
+    <header>
+      <h2 id="roomCodeDisplay">Room: ----</h2>
+      <div class="header-controls">
+        <button id="moviePartyBtn" style="display: none;"><span>🎬 Start Movie Party</span></button>
+        <button id="micToggle"><span>🎤 Mute</span></button>
+        <button id="leaveBtn"><span>🚪 Leave</span></button>
+      </div>
+    </header>
+
+    <main>
+      <div id="participants" class="participants-list"></div>
+      
+      <!-- Movie Party Section -->
+      <div id="moviePartySection" class="movie-party-section" style="display: none;">
+        <div class="movie-container">
+          <video id="movieVideo" class="movie-video" controls style="display: none;">
+            Your browser does not support the video tag.
+          </video>
+          <div id="movieStatus" class="movie-status">No movie loaded</div>
+          <div id="movieControls" class="movie-controls" style="display: none;">
+            <!-- Host controls will be shown here -->
+          </div>
+        </div>
+      </div>
+      
+      <div class="emoji-panel">
+        <button class="emoji-btn" data-emoji="😂">😂</button>
+        <button class="emoji-btn" data-emoji="❤️">❤️</button>
+        <button class="emoji-btn" data-emoji="😙">😙</button>
+        <button class="emoji-btn" data-emoji="🥺">🥺</button>
+        <button class="emoji-btn" data-emoji="🤔">🤔</button>
+        <button class="emoji-btn" data-emoji="😡">😡</button>
+      </div>
+      
+      <div id="emoji-overlay"></div>
+    </main>
+  </div>
+
+  <script src="js/signaling-websocket.js"></script>
+  <script src="js/meeting.js"></script>
+  <script src="js/movie-party.js"></script>
+</body>
+</html>

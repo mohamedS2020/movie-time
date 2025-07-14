@@ -1,0 +1,16 @@
+{
+  "name": "voice-meet-frontend",
+  "version": "1.0.0",
+  "description": "QuickVoice Meet - Ultra HD Voice Meetings with Movie Party",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Static site - no build step required'",
+    "start": "vercel dev"
+  },
+  "keywords": ["voice-meeting", "webrtc", "movie-party"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@vercel/node": "^2.0.0"
+  }
+}

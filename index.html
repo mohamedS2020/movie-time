@@ -1,0 +1,36 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🎤 QuickVoice Meet - Ultra HD Voice Meetings</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <meta name="description" content="Crystal clear, ultra-low latency voice meetings with stunning design">
+  <script src="js/config.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>🎤 QuickVoice Meet</h1>
+    <p style="color: var(--text-secondary); margin-bottom: 32px; font-size: 1.1rem; font-weight: 400;">
+      Ultra-HD voice meetings with zero latency
+    </p>
+    
+    <!-- Create button moved to top -->
+    <button id="createBtn" style="margin-bottom: 24px;"><span>🚀 Create Meeting</span></button>
+    
+    <input type="text" id="displayName" placeholder="✨ Enter your name" />
+
+    <div class="actions">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <input type="text" id="joinCode" placeholder="🔑 Meeting Code" maxlength="10" style="margin: 0;" />
+        <button id="joinBtn"><span>🎯 Join Meeting</span></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
