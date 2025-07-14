@@ -89,21 +89,24 @@ wss.on('connection', ws => {
             }
           });
           
-          // Also send a signal to trigger cross-connections between existing peers
-          if (existingParticipants.length >= 2) {
-            // When C joins and A,B already exist, make sure B knows about A (and vice versa)
+          // Enhanced cross-connection logic for better mesh networking
+          if (existingParticipants.length >= 1) {
+            // Ensure all existing peers know about each other and the new peer
             existingParticipants.forEach(peer1 => {
-              existingParticipants.forEach(peer2 => {
-                if (peer1 !== peer2) {
-                  const client1 = rooms[roomId].find(c => c.userName === peer1);
-                  if (client1 && client1.readyState === WebSocket.OPEN) {
-                    client1.send(JSON.stringify({
-                      type: 'refresh-peer',
-                      name: peer2
-                    }));
-                  }
-                }
-              });
+              const client1 = rooms[roomId].find(c => c.userName === peer1);
+              if (client1 && client1.readyState === WebSocket.OPEN) {
+                // Tell existing peer about new joiner
+                client1.send(JSON.stringify({
+                  type: 'refresh-peer',
+                  name: name
+                }));
+                
+                // Tell new joiner about existing peer (redundant but ensures connection)
+                ws.send(JSON.stringify({
+                  type: 'refresh-peer',
+                  name: peer1
+                }));
+              }
             });
           }
           break;
