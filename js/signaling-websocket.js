@@ -1,7 +1,6 @@
 // js/signaling-websocket.js - WebSocket version that works with legacy server
 let socket = null;
 const peers = {}; // { peerName: RTCPeerConnection }
-let localStream = null; // Will be set from meeting.js
 
 // Define roomCode and userName locally with unique names
 const roomCodeSignaling = new URLSearchParams(window.location.search).get("code");
@@ -135,16 +134,18 @@ function handleWebSocketMessage(data) {
     case 'existing-peer':
       console.log('Found existing peer:', data.name);
       addParticipant(data.name);
-      // Always create offer when finding existing peer (simplified)
-      setTimeout(() => createOffer(data.name), 100);
+      // Only polite peer (joiner) creates offer
+      if (isPolite) {
+        setTimeout(() => createOffer(data.name), 100);
+      }
       break;
       
     case 'new-peer':
       console.log('New peer joined:', data.name);
       addParticipant(data.name);
-      // Host creates offers to new joiners
-      if (isHostSignaling) {
-        setTimeout(() => createOffer(data.name), 200);
+      // Only polite peer (joiner) creates offer
+      if (isPolite) {
+        createOffer(data.name);
       }
       break;
       
@@ -541,10 +542,9 @@ async function createOffer(peerName) {
       return;
     }
     
-    console.log('✅ Creating offer for:', peerName, 'Local stream available:', !!localStream);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    console.log('📤 Sending offer to:', peerName, 'Offer SDP type:', offer.type);
+    console.log('Sending offer to:', peerName);
     socket.send(JSON.stringify({
       type: 'signal',
       roomId: roomCodeSignaling,
@@ -572,13 +572,14 @@ async function handleSignal(from, signal) {
       
       if (signal.sdp.type === 'offer') {
         const offerCollision = makingOffer || pc.signalingState !== 'stable';
-        
-        // Simplified: Always handle offers, but avoid collision loops
-        if (offerCollision && !isHostSignaling) {
-          console.log('Offer collision detected, rolling back for non-host');
+        ignoreOffer = !isPolite && offerCollision;
+        if (ignoreOffer) {
+          console.warn('Impolite peer ignoring offer due to collision');
+          return;
+        }
+        if (offerCollision) {
           await pc.setLocalDescription({ type: 'rollback' });
         }
-        
         await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
         console.log('Creating answer for:', from);
         const answer = await pc.createAnswer();
@@ -649,21 +650,3 @@ window.sendWebSocketMessage = sendWebSocketMessage;
 // Export functions for movie party
 window.sendMovieSignal = sendMovieSignal;
 window.requestMovieStateSync = requestMovieStateSync;
-
-// Function to set local stream from meeting.js
-function setLocalStream(stream) {
-  localStream = stream;
-  console.log('✅ Local stream set in signaling:', stream);
-  
-  // Try to connect to any waiting peers
-  Object.keys(peers).forEach(peerName => {
-    const pc = peers[peerName];
-    if (pc && pc.signalingState === 'stable' && pc.connectionState !== 'connected') {
-      console.log('🔄 Retrying connection to', peerName, 'with local stream');
-      setTimeout(() => createOffer(peerName), 500);
-    }
-  });
-}
-
-// Make function available globally for meeting.js
-window.setLocalStream = setLocalStream;

@@ -174,12 +174,6 @@ navigator.mediaDevices.getUserMedia({
   .then(stream => {
     console.log('Ultra-high quality microphone access granted with enhanced echo cancellation');
     localStream = stream;
-    
-    // CRITICAL: Set local stream in signaling for WebRTC connections
-    if (window.setLocalStream) {
-      window.setLocalStream(stream);
-    }
-    
     addParticipant(userName, true);
     
     // Get the audio track for advanced processing
