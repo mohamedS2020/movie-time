@@ -4,8 +4,8 @@ const config = {
     SERVER_URL: 'http://localhost:8080'
   },
   production: {
-    // Update this with your actual Railway/server URL
-    SERVER_URL: 'https://movie-time-production-370b.up.railway.app'
+    // Update this with your actual Fly.io server URL
+    SERVER_URL: 'https://movie-time.fly.dev'
   }
 };
 
