@@ -14,11 +14,9 @@
   "keywords": ["voice-meeting", "movie-party", "webrtc", "websocket"],
   "author": "",
   "license": "ISC",
-  "description": "Enhanced voice meeting server with movie party features (WebSocket based)",
+  "description": "Enhanced voice meeting server with WebTorrent movie party features",
   "dependencies": {
     "ws": "^8.18.3",
-    "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1",
-    "mime-types": "^2.1.35"
+    "express": "^4.19.2"
   }
 }

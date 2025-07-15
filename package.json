@@ -7,10 +7,13 @@
     "build": "echo 'Static site - no build step required'",
     "start": "vercel dev"
   },
-  "keywords": ["voice-meeting", "webrtc", "movie-party"],
+  "keywords": ["voice-meeting", "webrtc", "movie-party", "webtorrent"],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@vercel/node": "^2.0.0"
+  },
+  "dependencies": {
+    "webtorrent": "^2.0.0"
   }
 }

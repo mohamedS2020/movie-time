@@ -196,6 +196,12 @@ function handleWebSocketMessage(data) {
       }
       break;
       
+    case 'peer-status':
+      if (window.handlePeerStatus) {
+        window.handlePeerStatus(data);
+      }
+      break;
+      
     case 'video-state-sync':
       if (window.handleVideoStateSync) {
         window.handleVideoStateSync(data);
@@ -217,6 +223,12 @@ function handleWebSocketMessage(data) {
     case 'movie-seek':
       if (window.handleMovieSeek) {
         window.handleMovieSeek(data);
+      }
+      break;
+      
+    case 'late-joiner-sync':
+      if (window.handleLateJoinerSync) {
+        window.handleLateJoinerSync(data);
       }
       break;
       

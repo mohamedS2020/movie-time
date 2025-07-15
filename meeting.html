@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script src="js/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
 </head>
 <body class="meeting-page">
   <div class="meeting-container">
@@ -27,10 +28,11 @@
       <!-- Movie Party Section -->
       <div id="moviePartySection" class="movie-party-section" style="display: none;">
         <div class="movie-container">
-          <video id="movieVideo" class="movie-video" controls style="display: none;">
+          <video id="movieVideo" controls style="width: 100%; max-height: 500px; display: none;">
             Your browser does not support the video tag.
           </video>
-          <div id="movieStatus" class="movie-status">No movie loaded</div>
+          <input type="file" id="movieFileInput" accept="video/mp4,.vtt" style="display: none;">
+          <div id="movieStatus" style="display: none; color: white; background: #444; padding: 10px; border-radius: 8px; margin: 10px 0;">No movie loaded</div>
           <div id="movieControls" class="movie-controls" style="display: none;">
             <!-- Host controls will be shown here -->
           </div>
@@ -52,6 +54,7 @@
 
   <script src="js/signaling-websocket.js"></script>
   <script src="js/meeting.js"></script>
+  <script src="js/movie-party-webtorrent.js"></script>
   <script src="js/movie-party.js"></script>
 </body>
 </html>

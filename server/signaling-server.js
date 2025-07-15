@@ -1,10 +1,8 @@
 const WebSocket = require('ws');
 const express = require('express');
 const http = require('http');
-const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const mime = require('mime-types');
 
 const PORT = process.env.PORT || 8080;
 
@@ -40,9 +38,9 @@ app.get('/meeting', (req, res) => {
 // WebSocket server (keeping the working legacy logic)
 const wss = new WebSocket.Server({ server });
 const rooms = {};
-const videoStates = {}; // Add video state tracking
+const videoStates = {}; // Keep for WebSocket sync states only
 
-console.log(`Enhanced Legacy Server starting on http://localhost:${PORT}`);
+console.log(`Enhanced WebTorrent Server starting on http://localhost:${PORT}`);
 
 wss.on('connection', ws => {
   console.log('New WebSocket connection');
@@ -80,6 +78,35 @@ wss.on('connection', ws => {
               name: existingName 
             }));
           });
+
+          // Check if there's an active movie party and send it to the new joiner
+          const currentMovie = videoStates[roomId];
+          if (currentMovie && currentMovie.magnetURI) {
+            console.log(`🎬 Sending current movie party state to ${name}`);
+            
+            // Calculate the current playback position for late joiners
+            let currentTime = currentMovie.currentTime || 0;
+            if (currentMovie.isPlaying && currentMovie.lastUpdateTime) {
+              const timeSinceUpdate = (Date.now() - currentMovie.lastUpdateTime) / 1000;
+              currentTime += timeSinceUpdate;
+            }
+            
+            // Send the video info first
+            ws.send(JSON.stringify({
+              type: 'video-uploaded',
+              magnetURI: currentMovie.magnetURI,
+              fileName: currentMovie.fileName,
+              host: currentMovie.host
+            }));
+            
+            // Send the current synchronized state
+            ws.send(JSON.stringify({
+              type: 'late-joiner-sync',
+              isPlaying: currentMovie.isPlaying,
+              currentTime: currentTime,
+              timestamp: Date.now()
+            }));
+          }
 
           // Notify ALL participants (including existing ones) about the new peer
           // This ensures everyone knows about everyone else
@@ -162,7 +189,33 @@ wss.on('connection', ws => {
           });
           break;
 
-        // Movie Party Controls (added to legacy server)
+        // Movie Party Controls (WebTorrent-based)
+        case 'video-uploaded':
+          console.log(`🎬 ${name} started WebTorrent movie party in room ${roomId}`);
+          
+          // Store video state for WebTorrent
+          videoStates[roomId] = {
+            magnetURI: data.magnetURI,
+            fileName: data.fileName,
+            isPlaying: false,
+            currentTime: 0,
+            host: name,
+            uploadTime: Date.now(),
+            lastUpdateTime: Date.now()
+          };
+
+          // Notify all other participants
+          (rooms[roomId] || []).forEach(client => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({
+                type: 'video-uploaded',
+                magnetURI: data.magnetURI,
+                fileName: data.fileName,
+                host: name
+              }));
+            }
+          });
+          break;
         case 'movie-play':
           console.log(`▶️ ${name} played video in room ${roomId}`);
           if (videoStates[roomId] && videoStates[roomId].host === name) {
@@ -232,6 +285,19 @@ wss.on('connection', ws => {
           });
           break;
 
+        case 'peer-status':
+          console.log(`👥 Peer ${name} status: ${data.status} in room ${roomId}`);
+          (rooms[roomId] || []).forEach(client => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({
+                type: 'peer-status',
+                user: name,
+                status: data.status
+              }));
+            }
+          });
+          break;
+
         case 'request-video-state':
           console.log(`🔄 Video state requested by ${name} in room ${roomId}`);
           if (videoStates[roomId]) {
@@ -245,6 +311,7 @@ wss.on('connection', ws => {
             ws.send(JSON.stringify({
               type: 'video-state-sync',
               hasVideo: true,
+              magnetURI: currentState.magnetURI,
               fileName: currentState.fileName,
               isPlaying: currentState.isPlaying,
               currentTime: adjustedCurrentTime,
@@ -254,6 +321,7 @@ wss.on('connection', ws => {
             ws.send(JSON.stringify({
               type: 'video-state-sync',
               hasVideo: false,
+              magnetURI: null,
               fileName: null,
               isPlaying: false,
               currentTime: 0,
@@ -265,18 +333,6 @@ wss.on('connection', ws => {
         case 'stop-movie-party':
           console.log(`🛑 Host ${name} stopped movie party in room ${roomId}`);
           if (videoStates[roomId] && videoStates[roomId].host === name) {
-            const videoPath = videoStates[roomId].filePath;
-            
-            // Clean up video file
-            if (fs.existsSync(videoPath)) {
-              try {
-                fs.unlinkSync(videoPath);
-                console.log(`🗑️ Cleaned up video file: ${videoPath}`);
-              } catch (error) {
-                console.error(`❌ Error deleting video file: ${error.message}`);
-              }
-            }
-            
             delete videoStates[roomId];
             
             // Notify all participants
@@ -301,6 +357,25 @@ wss.on('connection', ws => {
   ws.on('close', () => {
     if (rooms[roomId] && name) {
       console.log(`${name} left room ${roomId}`);
+      
+      // Check if the leaving user was hosting a movie party
+      const currentMovie = videoStates[roomId];
+      if (currentMovie && currentMovie.host === name) {
+        console.log(`🛑 Movie party host ${name} left room ${roomId}, ending movie party`);
+        delete videoStates[roomId];
+        
+        // Notify remaining participants that movie party ended
+        rooms[roomId].forEach(client => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'movie-party-ended',
+              host: name,
+              message: 'Movie party ended - host left the room'
+            }));
+          }
+        });
+      }
+      
       rooms[roomId] = rooms[roomId].filter(c => c !== ws);
       rooms[roomId].forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
@@ -324,135 +399,20 @@ wss.on('connection', ws => {
   });
 });
 
-console.log(`Enhanced Legacy Server running on http://localhost:${PORT}`);
-
 // Start the server
 server.listen(PORT, () => {
-  console.log(`🎬 Enhanced Legacy Server running on http://localhost:${PORT}`);
-  console.log(`📁 Video uploads stored in: ${path.join(__dirname, 'uploads')}`);
+  console.log(`🎬 Enhanced WebTorrent Server running on http://localhost:${PORT}`);
+  console.log(`🌐 WebTorrent peer-to-peer movie streaming enabled`);
 });
 
 // Simple health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Legacy Voice Meet Server' });
+  res.json({ status: 'OK', message: 'Voice Meet Server with WebTorrent Support' });
 });
 
-// Configure multer for video uploads (simple)
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const roomId = req.body.roomId || 'default';
-    const ext = path.extname(file.originalname);
-    cb(null, `movie-${roomId}-${Date.now()}${ext}`);
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('video/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only video files allowed'), false);
-    }
-  },
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 } // 2GB
-});
-
-// Video upload endpoint
-app.post('/upload-video', upload.single('video'), (req, res) => {
-  try {
-    const { roomId, hostName } = req.body;
-    
-    if (!req.file) {
-      return res.status(400).json({ error: 'No video file uploaded' });
-    }
-
-    console.log(`📹 Video uploaded for room ${roomId} by ${hostName}`);
-    
-    // Store video state
-    videoStates[roomId] = {
-      filePath: req.file.path,
-      fileName: req.file.originalname,
-      isPlaying: false,
-      currentTime: 0,
-      host: hostName,
-      uploadTime: Date.now(),
-      lastUpdateTime: Date.now()
-    };
-
-    // Notify all clients via WebSocket
-    if (rooms[roomId]) {
-      rooms[roomId].forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({
-            type: 'video-uploaded',
-            fileName: req.file.originalname,
-            host: hostName
-          }));
-        }
-      });
-    }
-
-    res.json({ 
-      success: true, 
-      fileName: req.file.originalname,
-      message: 'Video uploaded successfully' 
-    });
-  } catch (error) {
-    console.error('Video upload error:', error);
-    res.status(500).json({ error: 'Failed to upload video' });
-  }
-});
-
-// Video streaming endpoint
-app.get('/movie/:roomId', (req, res) => {
-  const { roomId } = req.params;
-  const videoState = videoStates[roomId];
-
-  if (!videoState || !videoState.filePath) {
-    return res.status(404).json({ error: 'No video found for this room' });
-  }
-
-  const videoPath = videoState.filePath;
-  
-  if (!fs.existsSync(videoPath)) {
-    return res.status(404).json({ error: 'Video file not found' });
-  }
-
-  const stat = fs.statSync(videoPath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunksize = (end - start) + 1;
-    
-    const file = fs.createReadStream(videoPath, { start, end });
-    const head = {
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunksize,
-      'Content-Type': mime.lookup(videoPath) || 'video/mp4',
-    };
-    
-    res.writeHead(206, head);
-    file.pipe(res);
-  } else {
-    const head = {
-      'Content-Length': fileSize,
-      'Content-Type': mime.lookup(videoPath) || 'video/mp4',
-    };
-    
-    res.writeHead(200, head);
-    fs.createReadStream(videoPath).pipe(res);
-  }
+// Optional fallback endpoint for non-WebTorrent users (if needed)
+app.get('/fallback/:roomId/:fileName', (req, res) => {
+  res.status(404).json({ 
+    error: 'Fallback streaming not implemented. Use WebTorrent for movie party.' 
+  });
 });

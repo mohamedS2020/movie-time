@@ -515,6 +515,7 @@ main {
   gap: 16px;
   width: 100%;
   max-width: 100%;
+  position: relative;
 }
 
 .movie-video {
@@ -526,6 +527,68 @@ main {
   box-shadow: var(--shadow-lg);
   background: #000;
   object-fit: contain;
+}
+
+/* Participant Controls */
+.participant-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,0.8));
+  padding: 12px 16px;
+  border-radius: 0 0 var(--border-radius) var(--border-radius);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10;
+}
+
+.participant-controls input[type="range"] {
+  width: 100px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0 8px;
+}
+
+.participant-controls input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.participant-controls input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.participant-controls button {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  transition: var(--transition);
+}
+
+.participant-controls button:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .movie-status {
@@ -700,6 +763,151 @@ main {
   .movie-time-display {
     font-size: 1rem;
     padding: 6px 12px;
+  }
+}
+
+/* WebTorrent Movie Party Styles */
+#movieStatus {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: center;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 10px 0;
+  box-shadow: var(--shadow-sm);
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#movieStatus:empty {
+  display: none;
+}
+
+#movieFileInput {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+#movieVideo {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 16/9;
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-lg);
+  background: #000;
+  object-fit: contain;
+  transition: var(--transition);
+}
+
+#movieVideo:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+/* WebTorrent Status Indicators */
+.webtorrent-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  background: rgba(102, 126, 234, 0.1);
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  margin: 8px 0;
+}
+
+.webtorrent-status.seeding {
+  background: rgba(0, 184, 148, 0.1);
+  border-color: rgba(0, 184, 148, 0.2);
+  color: #00b894;
+}
+
+.webtorrent-status.downloading {
+  background: rgba(253, 203, 110, 0.1);
+  border-color: rgba(253, 203, 110, 0.2);
+  color: #fdcb6e;
+}
+
+.webtorrent-status.buffering {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.2);
+  color: #ff6b6b;
+}
+
+/* Peer Status Display */
+.peer-status-container {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius);
+  padding: 12px;
+  margin-top: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.peer-status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.peer-status-item .peer-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.peer-status-item .peer-state {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.peer-state.playing {
+  background: rgba(0, 184, 148, 0.2);
+  border-color: rgba(0, 184, 148, 0.3);
+  color: #00b894;
+}
+
+.peer-state.buffering {
+  background: rgba(253, 203, 110, 0.2);
+  border-color: rgba(253, 203, 110, 0.3);
+  color: #fdcb6e;
+}
+
+/* Mobile optimizations for WebTorrent */
+@media (max-width: 768px) {
+  #movieVideo {
+    border-radius: 8px;
+  }
+  
+  #movieStatus {
+    font-size: 0.9rem;
+    padding: 10px 12px;
+    margin: 8px 0;
+  }
+  
+  .webtorrent-status {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+  }
+  
+  .peer-status-container {
+    padding: 8px;
   }
 }
 
