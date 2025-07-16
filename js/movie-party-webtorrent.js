@@ -142,32 +142,8 @@ class MoviePartyPlayer {
   streamTorrent(torrent) {
     console.log('🎬 Streaming torrent with files:', torrent.files.map(f => f.name));
     
-    // Add progress reporting
-    this.showStatus('Connecting to movie stream...');
-    
-    // Report download progress
-    const progressInterval = setInterval(() => {
-      const progress = Math.round(torrent.progress * 100);
-      const downloaded = Math.round(torrent.downloaded / 1024 / 1024);
-      const total = Math.round(torrent.length / 1024 / 1024);
-      
-      if (progress > 0) {
-        this.showStatus(`Downloading movie: ${progress}% (${downloaded}/${total} MB)`);
-      }
-      
-      if (progress === 100) {
-        clearInterval(progressInterval);
-        this.showStatus('Movie ready!');
-      }
-    }, 1000);
-
-    // Clear progress interval after 60 seconds if still not complete
-    setTimeout(() => {
-      clearInterval(progressInterval);
-      if (torrent.progress < 1) {
-        this.showStatus('Download taking longer than expected. Please wait...');
-      }
-    }, 60000);
+    // Show brief connecting message
+    this.showStatus('Starting video stream...');
     
     // Look for video file - be more flexible with extensions
     const file = torrent.files.find(file => 
@@ -202,26 +178,41 @@ class MoviePartyPlayer {
     // Mark as streaming to prevent duplicate renders
     this.isVideoStreaming = true;
 
-    // Create a new blob URL for the video
+    // ⚡ INSTANT STREAMING - Start playing immediately while downloading
+    // WebTorrent creates a streaming blob URL that plays as it downloads
     file.getBlobURL((err, url) => {
       if (err) {
-        console.error('Error getting blob URL:', err);
+        console.error('Error getting streaming URL:', err);
         this.isVideoStreaming = false;
+        this.showStatus('Failed to start video stream', true);
         return;
       }
 
-      // Set the video source to the blob URL
+      // Set the video source - this will start playing immediately
       this.videoElement.src = url;
       this.videoElement.controls = this.isHost; // Only show full controls for host
+      
+      // Hide connecting message - video starts immediately
       this.hideStatus();
       
-      console.log('📺 Video blob URL set successfully');
+      console.log('📺 Video streaming URL set - playing while downloading');
       
       // Setup custom controls for participants
       if (!this.isHost) {
         this.setupParticipantControls();
       }
     });
+    
+    // Optional: Show download progress in background without blocking playback
+    const backgroundProgressInterval = setInterval(() => {
+      const progress = Math.round(torrent.progress * 100);
+      console.log(`📥 Background download: ${progress}%`);
+      
+      if (progress === 100) {
+        clearInterval(backgroundProgressInterval);
+        console.log('📥 Full video downloaded - streaming will be smoother');
+      }
+    }, 5000); // Check every 5 seconds, don't spam
 
     if (subtitle) {
       subtitle.getBlob((err, blob) => {
