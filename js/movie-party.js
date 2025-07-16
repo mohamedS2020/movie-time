@@ -63,10 +63,19 @@ function handleMoviePartyToggle() {
 function startMovieParty() {
   console.log('🎬 Starting Movie Party (WebTorrent Integration)...');
   
-  // MoviePartyPlayer should already be created during initialization
+  // Recreate MoviePartyPlayer if it was destroyed
   if (!moviePartyPlayer) {
-    console.error('❌ MoviePartyPlayer not initialized! This should not happen.');
-    return;
+    console.log('🎬 Recreating MoviePartyPlayer after previous session ended...');
+    if (typeof MoviePartyPlayer !== 'undefined') {
+      moviePartyPlayer = new MoviePartyPlayer({
+        videoElementId: 'movieVideo',
+        fileInputId: 'movieFileInput',
+        statusDisplayId: 'movieStatus'
+      });
+    } else {
+      console.error('❌ MoviePartyPlayer class not available!');
+      return;
+    }
   }
   
   // Show movie party section
@@ -88,13 +97,10 @@ function startMovieParty() {
     movieStatus.style.display = 'block';
   }
   
-  // For hosts, trigger file input - but don't add duplicate event listener
+  // For hosts, trigger file input
   if (isHostMovieParty && movieFileInput) {
-    // Only add event listener if not already added
-    if (!movieFileInput.hasAttribute('data-listener-added')) {
-      movieFileInput.addEventListener('change', handleMovieFileSelected);
-      movieFileInput.setAttribute('data-listener-added', 'true');
-    }
+    // Reset file input to ensure it can be used again
+    movieFileInput.value = '';
     movieFileInput.click();
   }
   
@@ -124,6 +130,7 @@ function stopMovieParty() {
   const moviePartySection = document.getElementById('moviePartySection');
   const movieVideo = document.getElementById('movieVideo');
   const movieStatus = document.getElementById('movieStatus');
+  const movieFileInput = document.getElementById('movieFileInput');
   
   if (moviePartySection) {
     moviePartySection.style.display = 'none';
@@ -138,6 +145,12 @@ function stopMovieParty() {
   if (movieStatus) {
     movieStatus.textContent = 'No movie loaded';
     movieStatus.style.display = 'none';
+  }
+  
+  // Reset file input
+  if (movieFileInput) {
+    movieFileInput.value = '';
+    movieFileInput.removeAttribute('data-listener-added');
   }
   
   isMoviePartyActive = false;

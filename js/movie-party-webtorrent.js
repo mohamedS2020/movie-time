@@ -52,7 +52,12 @@ class MoviePartyPlayer {
   initialize() {
     if (this.isHost) {
       this.fileInput.style.display = 'block';
-      this.fileInput.addEventListener('change', (event) => {
+      
+      // Remove existing event listeners to prevent duplicates
+      this.fileInput.removeEventListener('change', this.handleFileChange);
+      
+      // Bind the handler to maintain 'this' context
+      this.handleFileChange = (event) => {
         const file = event.target.files[0];
         if (!file) return;
 
@@ -70,7 +75,10 @@ class MoviePartyPlayer {
 
           this.streamTorrent(torrent);
         });
-      });
+      };
+      
+      // Add the event listener
+      this.fileInput.addEventListener('change', this.handleFileChange);
     } else {
       window.handleVideoUploaded = (data) => {
         const { magnetURI } = data;
@@ -390,8 +398,20 @@ class MoviePartyPlayer {
   destroy() {
     console.log('🧹 Destroying MoviePartyPlayer...');
     
+    // Send stop signal to server if this is a host
+    if (this.isHost && this.userName && window.sendMovieSignal) {
+      window.sendMovieSignal('stop-movie-party', {
+        host: this.userName
+      });
+    }
+    
     // Clean up video element properly
     this.cleanupVideoElement();
+    
+    // Clean up file input event listener
+    if (this.fileInput && this.handleFileChange) {
+      this.fileInput.removeEventListener('change', this.handleFileChange);
+    }
     
     // Clean up WebTorrent client
     if (this.client) {
