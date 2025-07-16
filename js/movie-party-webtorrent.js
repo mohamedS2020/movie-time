@@ -16,18 +16,20 @@ class MoviePartyPlayer {
 
     console.log('✅ WebTorrent loaded, initializing MoviePartyPlayer...');
     
-    // Create WebTorrent client with optimized settings for streaming
+    // Create WebTorrent client with stable settings
     this.client = new WebTorrent({
       tracker: {
         announce: [
           'wss://tracker.openwebtorrent.com',
-          'wss://tracker.btorrent.xyz',
-          'wss://tracker.webtorrent.io'
+          'wss://tracker.btorrent.xyz'
         ]
-      },
-      dht: false, // Disable DHT for faster connection
-      maxConns: 200, // Increase max connections
-      utp: false // Disable uTP for faster TCP connections
+      }
+    });
+    
+    // Add error handling to prevent crashes
+    this.client.on('error', (err) => {
+      console.error('⚠️ WebTorrent client error:', err);
+      this.showStatus('WebTorrent connection error. Please try again.', true);
     });
     this.videoElement = document.getElementById(videoElementId);
     this.statusDisplay = document.getElementById(statusDisplayId);
@@ -76,14 +78,8 @@ class MoviePartyPlayer {
 
         this.showStatus('Seeding video for movie party...');
 
-        // Seed with optimized settings for faster distribution
-        this.client.seed(file, {
-          announceList: [
-            ['wss://tracker.openwebtorrent.com'],
-            ['wss://tracker.btorrent.xyz'],
-            ['wss://tracker.webtorrent.io']
-          ]
-        }, (torrent) => {
+        // Seed with stable configuration
+        this.client.seed(file, (torrent) => {
           const magnetURI = torrent.magnetURI;
           console.log('🎬 Seeding torrent:', magnetURI);
 
@@ -139,26 +135,11 @@ class MoviePartyPlayer {
           // Add timeout for WebTorrent connection
           const torrentTimeout = setTimeout(() => {
             console.error('⚠️ WebTorrent connection timeout after 30 seconds');
-            this.showStatus('Connection timeout. Retrying...', true);
-            
-            // Try to reconnect after timeout
-            setTimeout(() => {
-              if (window.handleVideoUploaded) {
-                window.handleVideoUploaded(data);
-              }
-            }, 2000);
+            this.showStatus('Connection timeout. Please try again.', true);
           }, 30000); // 30 second timeout
 
-          // Add torrent with optimized settings for faster streaming
-          this.client.add(magnetURI, {
-            strategy: 'sequential', // Download sequentially for streaming
-            maxWebConns: 20, // Increase web connections
-            announce: [
-              'wss://tracker.openwebtorrent.com',
-              'wss://tracker.btorrent.xyz',
-              'wss://tracker.webtorrent.io'
-            ]
-          }, (torrent) => {
+          // Add torrent with stable configuration
+          this.client.add(magnetURI, (torrent) => {
             clearTimeout(torrentTimeout);
             console.log('✅ Torrent added successfully');
             this.streamTorrent(torrent);
@@ -185,8 +166,8 @@ class MoviePartyPlayer {
   streamTorrent(torrent) {
     console.log('🎬 Streaming torrent with files:', torrent.files.map(f => f.name));
     
-    // Show brief connecting message
-    this.showStatus('Starting video stream...');
+    // Show initial connecting message
+    this.showStatus('Connecting to video stream...');
     
     // Look for video file - be more flexible with extensions
     const file = torrent.files.find(file => 
@@ -221,40 +202,18 @@ class MoviePartyPlayer {
     // Mark as streaming to prevent duplicate renders
     this.isVideoStreaming = true;
 
-    // ⚡ ULTRA-INSTANT STREAMING - Try immediate streaming first
-    try {
-      // Try to get blob URL immediately (synchronous)
-      const url = file.getBlobURL();
-      if (url) {
-        console.log('⚡ Instant blob URL generated:', url);
-        
-        // Set video source immediately
-        this.videoElement.src = url;
-        this.videoElement.controls = this.isHost; // Only show full controls for host
-        
-        // Hide connecting message - video starts immediately
-        this.hideStatus();
-        
-        console.log('📺 Video streaming URL set - playing instantly');
-        
-        // Auto-play for better UX (with error handling)
-        this.videoElement.play().catch(e => {
-          console.log('ℹ️ Autoplay blocked - user needs to click play:', e.message);
-        });
-        
-        // Setup custom controls for participants
-        if (!this.isHost) {
-          this.setupParticipantControls();
-        }
-        
-        return; // Success! Exit early
+    // Show progress while waiting for stream to be ready
+    const progressInterval = setInterval(() => {
+      const progress = Math.round(torrent.progress * 100);
+      if (progress > 0) {
+        this.showStatus(`Preparing video stream... ${progress}%`);
       }
-    } catch (error) {
-      console.log('⚠️ Instant streaming failed, trying callback approach:', error);
-    }
-    
-    // Fallback: Use callback approach if instant fails
+    }, 1000);
+
+    // ⚡ STREAMING - Use callback approach for blob URL
     file.getBlobURL((err, url) => {
+      clearInterval(progressInterval);
+      
       if (err) {
         console.error('Error getting streaming URL:', err);
         this.isVideoStreaming = false;
@@ -262,11 +221,11 @@ class MoviePartyPlayer {
         return;
       }
 
-      // Set the video source - this will start playing immediately
+      // Set the video source immediately
       this.videoElement.src = url;
       this.videoElement.controls = this.isHost; // Only show full controls for host
       
-      // Hide connecting message - video starts immediately
+      // Hide connecting message immediately
       this.hideStatus();
       
       console.log('📺 Video streaming URL set - playing while downloading');
@@ -282,7 +241,7 @@ class MoviePartyPlayer {
       }
     });
     
-    // Start background download progress reporting
+    // Start background download progress tracking
     this.setupBackgroundDownload(torrent);
 
     if (subtitle) {
