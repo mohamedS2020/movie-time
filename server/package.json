@@ -11,12 +11,20 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["voice-meeting", "movie-party", "webrtc", "websocket"],
+  "keywords": [
+    "voice-meeting",
+    "movie-party",
+    "webrtc",
+    "websocket"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Enhanced voice meeting server with WebTorrent movie party features",
   "dependencies": {
-    "ws": "^8.18.3",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@flydotio/dockerfile": "^0.7.10"
   }
 }
