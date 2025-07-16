@@ -25,14 +25,24 @@ app.use((req, res, next) => {
 // Serve static files from the parent directory
 app.use(express.static(path.join(__dirname, '..')));
 
-// Serve index.html for root path
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'index.html'));
+  res.json({ 
+    status: 'OK', 
+    service: 'QuickVoice Meet WebSocket Server',
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Serve meeting.html for meeting path
 app.get('/meeting', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'meeting.html'));
+  res.json({ 
+    message: 'This is the WebSocket server. Frontend is deployed separately.',
+    websocket: 'wss://movie-time.fly.dev',
+    frontend: 'https://movie-time-eosin.vercel.app',
+    status: 'Server running - use frontend for meetings'
+  });
 });
 
 // WebSocket server (keeping the working legacy logic)
