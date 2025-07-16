@@ -35,9 +35,12 @@ class MoviePartyPlayer {
     this.initialize();
   }
 
-  showStatus(message) {
+  showStatus(message, showRetry = false) {
     if (this.statusDisplay) {
-      this.statusDisplay.innerText = message;
+      this.statusDisplay.innerHTML = `
+        <div>${message}</div>
+        ${showRetry ? '<button onclick="window.location.reload()" style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Retry Connection</button>' : ''}
+      `;
       this.statusDisplay.style.display = 'block';
     }
   }
@@ -105,9 +108,24 @@ class MoviePartyPlayer {
           // Clean up any existing streams before adding new torrent
           this.cleanupVideoElement();
 
+          // Add timeout for WebTorrent connection
+          const torrentTimeout = setTimeout(() => {
+            console.error('⚠️ WebTorrent connection timeout after 30 seconds');
+            this.showStatus('WebTorrent connection timeout. Try refreshing the page.', true);
+            // Could add fallback here if needed
+          }, 30000); // 30 second timeout
+
           this.client.add(magnetURI, (torrent) => {
+            clearTimeout(torrentTimeout);
             console.log('✅ Torrent added successfully');
             this.streamTorrent(torrent);
+          });
+
+          // Add error handling for WebTorrent client
+          this.client.on('error', (err) => {
+            clearTimeout(torrentTimeout);
+            console.error('⚠️ WebTorrent client error:', err);
+            this.showStatus('WebTorrent connection failed. Try refreshing the page.', true);
           });
         } catch (err) {
           console.error('⚠️ WebTorrent failed. Falling back.', err);
@@ -124,6 +142,33 @@ class MoviePartyPlayer {
   streamTorrent(torrent) {
     console.log('🎬 Streaming torrent with files:', torrent.files.map(f => f.name));
     
+    // Add progress reporting
+    this.showStatus('Connecting to movie stream...');
+    
+    // Report download progress
+    const progressInterval = setInterval(() => {
+      const progress = Math.round(torrent.progress * 100);
+      const downloaded = Math.round(torrent.downloaded / 1024 / 1024);
+      const total = Math.round(torrent.length / 1024 / 1024);
+      
+      if (progress > 0) {
+        this.showStatus(`Downloading movie: ${progress}% (${downloaded}/${total} MB)`);
+      }
+      
+      if (progress === 100) {
+        clearInterval(progressInterval);
+        this.showStatus('Movie ready!');
+      }
+    }, 1000);
+
+    // Clear progress interval after 60 seconds if still not complete
+    setTimeout(() => {
+      clearInterval(progressInterval);
+      if (torrent.progress < 1) {
+        this.showStatus('Download taking longer than expected. Please wait...');
+      }
+    }, 60000);
+    
     // Look for video file - be more flexible with extensions
     const file = torrent.files.find(file => 
       file.name.endsWith('.mp4') || 
@@ -138,6 +183,7 @@ class MoviePartyPlayer {
     if (!file) {
       console.error('No video file found in torrent');
       console.error('Available files:', torrent.files.map(f => f.name));
+      this.showStatus('No video file found in torrent');
       return;
     }
 
