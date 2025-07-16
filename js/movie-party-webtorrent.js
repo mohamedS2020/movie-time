@@ -15,7 +15,20 @@ class MoviePartyPlayer {
     }
 
     console.log('✅ WebTorrent loaded, initializing MoviePartyPlayer...');
-    this.client = new WebTorrent();
+    
+    // Create WebTorrent client with optimized settings for streaming
+    this.client = new WebTorrent({
+      tracker: {
+        announce: [
+          'wss://tracker.openwebtorrent.com',
+          'wss://tracker.btorrent.xyz',
+          'wss://tracker.webtorrent.io'
+        ]
+      },
+      dht: false, // Disable DHT for faster connection
+      maxConns: 200, // Increase max connections
+      utp: false // Disable uTP for faster TCP connections
+    });
     this.videoElement = document.getElementById(videoElementId);
     this.statusDisplay = document.getElementById(statusDisplayId);
     this.fileInput = document.getElementById(fileInputId);
@@ -63,7 +76,14 @@ class MoviePartyPlayer {
 
         this.showStatus('Seeding video for movie party...');
 
-        this.client.seed(file, (torrent) => {
+        // Seed with optimized settings for faster distribution
+        this.client.seed(file, {
+          announceList: [
+            ['wss://tracker.openwebtorrent.com'],
+            ['wss://tracker.btorrent.xyz'],
+            ['wss://tracker.webtorrent.io']
+          ]
+        }, (torrent) => {
           const magnetURI = torrent.magnetURI;
           console.log('🎬 Seeding torrent:', magnetURI);
 
@@ -119,11 +139,26 @@ class MoviePartyPlayer {
           // Add timeout for WebTorrent connection
           const torrentTimeout = setTimeout(() => {
             console.error('⚠️ WebTorrent connection timeout after 30 seconds');
-            this.showStatus('WebTorrent connection timeout. Try refreshing the page.', true);
-            // Could add fallback here if needed
+            this.showStatus('Connection timeout. Retrying...', true);
+            
+            // Try to reconnect after timeout
+            setTimeout(() => {
+              if (window.handleVideoUploaded) {
+                window.handleVideoUploaded(data);
+              }
+            }, 2000);
           }, 30000); // 30 second timeout
 
-          this.client.add(magnetURI, (torrent) => {
+          // Add torrent with optimized settings for faster streaming
+          this.client.add(magnetURI, {
+            strategy: 'sequential', // Download sequentially for streaming
+            maxWebConns: 20, // Increase web connections
+            announce: [
+              'wss://tracker.openwebtorrent.com',
+              'wss://tracker.btorrent.xyz',
+              'wss://tracker.webtorrent.io'
+            ]
+          }, (torrent) => {
             clearTimeout(torrentTimeout);
             console.log('✅ Torrent added successfully');
             this.streamTorrent(torrent);
@@ -186,8 +221,39 @@ class MoviePartyPlayer {
     // Mark as streaming to prevent duplicate renders
     this.isVideoStreaming = true;
 
-    // ⚡ INSTANT STREAMING - Start playing immediately while downloading
-    // WebTorrent creates a streaming blob URL that plays as it downloads
+    // ⚡ ULTRA-INSTANT STREAMING - Try immediate streaming first
+    try {
+      // Try to get blob URL immediately (synchronous)
+      const url = file.getBlobURL();
+      if (url) {
+        console.log('⚡ Instant blob URL generated:', url);
+        
+        // Set video source immediately
+        this.videoElement.src = url;
+        this.videoElement.controls = this.isHost; // Only show full controls for host
+        
+        // Hide connecting message - video starts immediately
+        this.hideStatus();
+        
+        console.log('📺 Video streaming URL set - playing instantly');
+        
+        // Auto-play for better UX (with error handling)
+        this.videoElement.play().catch(e => {
+          console.log('ℹ️ Autoplay blocked - user needs to click play:', e.message);
+        });
+        
+        // Setup custom controls for participants
+        if (!this.isHost) {
+          this.setupParticipantControls();
+        }
+        
+        return; // Success! Exit early
+      }
+    } catch (error) {
+      console.log('⚠️ Instant streaming failed, trying callback approach:', error);
+    }
+    
+    // Fallback: Use callback approach if instant fails
     file.getBlobURL((err, url) => {
       if (err) {
         console.error('Error getting streaming URL:', err);
@@ -205,12 +271,30 @@ class MoviePartyPlayer {
       
       console.log('📺 Video streaming URL set - playing while downloading');
       
+      // Auto-play for better UX (with error handling)
+      this.videoElement.play().catch(e => {
+        console.log('ℹ️ Autoplay blocked - user needs to click play:', e.message);
+      });
+      
       // Setup custom controls for participants
       if (!this.isHost) {
         this.setupParticipantControls();
       }
     });
     
+    // Start background download progress reporting
+    this.setupBackgroundDownload(torrent);
+
+    if (subtitle) {
+      subtitle.getBlob((err, blob) => {
+        if (!err) {
+          this.subtitleTrack.src = URL.createObjectURL(blob);
+        }
+      });
+    }
+  }
+  
+  setupBackgroundDownload(torrent) {
     // Optional: Show download progress in background without blocking playback
     const backgroundProgressInterval = setInterval(() => {
       const progress = Math.round(torrent.progress * 100);
@@ -220,15 +304,12 @@ class MoviePartyPlayer {
         clearInterval(backgroundProgressInterval);
         console.log('📥 Full video downloaded - streaming will be smoother');
       }
-    }, 5000); // Check every 5 seconds, don't spam
-
-    if (subtitle) {
-      subtitle.getBlob((err, blob) => {
-        if (!err) {
-          this.subtitleTrack.src = URL.createObjectURL(blob);
-        }
-      });
-    }
+    }, 3000); // Check every 3 seconds
+    
+    // Clear interval after 5 minutes to prevent memory leaks
+    setTimeout(() => {
+      clearInterval(backgroundProgressInterval);
+    }, 300000); // 5 minutes
   }
 
   cleanupVideoElement() {
