@@ -410,8 +410,8 @@ wss.on('connection', ws => {
 });
 
 // Start the server
-server.listen(PORT, () => {
-  console.log(`🎬 Enhanced WebTorrent Server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🎬 Enhanced WebTorrent Server running on http://0.0.0.0:${PORT}`);
   console.log(`🌐 WebTorrent peer-to-peer movie streaming enabled`);
 });
 
