@@ -254,7 +254,7 @@ class MoviePartyPlayer {
     
     // PROGRESSIVE DOWNLOAD: Start with smaller chunks for instant playback
     const chunkSize = 1024 * 1024; // 1MB chunks
-    const minPlaybackSize = 5 * 1024 * 1024; // Start playback after 5MB
+    const minPlaybackSize = 100 * 1024 * 1024; // Start playback after 5MB
     
     const downloadChunk = (start, end) => {
       if (start >= firstChunkSize) {
