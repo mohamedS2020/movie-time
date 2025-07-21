@@ -1,428 +1,731 @@
-const WebSocket = require('ws');
-const express = require('express');
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+// movie-party-webtorrent-progressive.js - INSTANT PROGRESSIVE STREAMING
 
-const PORT = process.env.PORT || 8080;
-
-// Create Express app for HTTP endpoints (minimal)
-const app = express();
-const server = http.createServer(app);
-
-// Simple CORS for HTTP requests
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
+class MoviePartyPlayer {
+  constructor({ videoElementId = 'movieVideo', fileInputId = 'movieFileInput', statusDisplayId = 'movieStatus' }) {
+    this.initializeWhenReady(videoElementId, fileInputId, statusDisplayId);
   }
-});
 
-// Serve static files from the parent directory
-app.use(express.static(path.join(__dirname, '..')));
+  initializeWhenReady(videoElementId, fileInputId, statusDisplayId) {
+    if (typeof WebTorrent === 'undefined') {
+      console.log('🔄 Waiting for WebTorrent to load...');
+      setTimeout(() => this.initializeWhenReady(videoElementId, fileInputId, statusDisplayId), 100);
+      return;
+    }
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    service: 'QuickVoice Meet WebSocket Server',
-    version: '1.0.0',
-    timestamp: new Date().toISOString()
-  });
-});
+    console.log('✅ WebTorrent loaded, initializing MoviePartyPlayer...');
+    
+    // Optimized for progressive streaming
+    this.client = new WebTorrent({
+      tracker: {
+        announce: [
+          'wss://tracker.openwebtorrent.com',
+          'wss://tracker.btorrent.xyz',
+          'wss://tracker.webtorrent.io'
+        ]
+      },
+      maxConns: 150,
+      downloadLimit: -1, // No download limit
+      uploadLimit: -1,   // No upload limit
+      dht: true
+    });
+    
+    this.client.on('error', (err) => {
+      console.error('⚠️ WebTorrent client error:', err);
+      this.showStatus('Connection error. Retrying...', true);
+    });
 
-// Serve meeting.html for meeting path
-app.get('/meeting', (req, res) => {
-  res.json({ 
-    message: 'This is the WebSocket server. Frontend is deployed separately.',
-    websocket: 'wss://movie-time.fly.dev',
-    frontend: 'https://movie-time-eosin.vercel.app',
-    status: 'Server running - use frontend for meetings'
-  });
-});
+    this.videoElement = document.getElementById(videoElementId);
+    this.statusDisplay = document.getElementById(statusDisplayId);
+    this.fileInput = document.getElementById(fileInputId);
+    this.isHost = sessionStorage.getItem('isHost') === 'true';
+    this.userName = sessionStorage.getItem('userName');
+    this.roomCode = new URLSearchParams(window.location.search).get('code');
+    
+    this.isVideoStreaming = false;
+    this.currentTorrent = null;
+    this.syncInProgress = false;
+    this.progressiveStream = null;
 
-// WebSocket server (keeping the working legacy logic)
-const wss = new WebSocket.Server({ server });
-const rooms = {};
-const videoStates = {}; // Keep for WebSocket sync states only
+    this.initialize();
+  }
 
-console.log(`Enhanced WebTorrent Server starting on http://localhost:${PORT}`);
+  showStatus(message, showRetry = false) {
+    if (this.statusDisplay) {
+      this.statusDisplay.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="spinner" style="width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+          <span>${message}</span>
+        </div>
+        <style>
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+        ${showRetry ? '<button onclick="window.location.reload()" style="margin-top: 10px; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Retry Connection</button>' : ''}
+      `;
+      this.statusDisplay.style.display = 'block';
+    }
+  }
 
-wss.on('connection', ws => {
-  console.log('New WebSocket connection');
-  let roomId, name;
+  hideStatus() {
+    if (this.statusDisplay) this.statusDisplay.style.display = 'none';
+  }
 
-  ws.on('message', msg => {
+  initialize() {
+    if (this.isHost) {
+      this.setupHost();
+    } else {
+      this.setupParticipant();
+    }
+    
+    this.setupVideoEvents();
+  }
+
+  setupHost() {
+    console.log('🎬 Setting up HOST controls');
+    this.fileInput.style.display = 'block';
+    
+    this.fileInput.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      this.showStatus('🚀 Starting instant streaming...');
+
+      // PROGRESSIVE SEEDING - Start streaming immediately
+      this.client.seed(file, { 
+        strategy: 'sequential', // Download/seed sequentially for streaming
+        announceList: [
+          ['wss://tracker.openwebtorrent.com'],
+          ['wss://tracker.btorrent.xyz'],
+          ['wss://tracker.webtorrent.io']
+        ]
+      }, (torrent) => {
+        console.log('🎬 Torrent created, starting progressive streaming immediately');
+        
+        // INSTANT NOTIFICATION - Don't wait for full upload
+        window.sendMovieSignal('video-uploaded', {
+          host: this.userName,
+          magnetURI: torrent.magnetURI,
+          fileName: file.name,
+          fileSize: file.size
+        });
+        
+        // Start streaming for host immediately
+        this.startProgressiveStreaming(torrent);
+      });
+    });
+  }
+
+  setupParticipant() {
+    console.log('👥 Setting up PARTICIPANT (progressive receive mode)');
+    
+    window.handleVideoUploaded = (data) => {
+      const { magnetURI, fileName, fileSize } = data;
+      
+      this.showStatus('⚡ Connecting to live stream...');
+      this.showMoviePartyUI();
+      
+      // INSTANT CONNECTION - Start progressive streaming immediately
+      this.connectToProgressiveStream(magnetURI);
+    };
+  }
+
+  showMoviePartyUI() {
+    const moviePartySection = document.getElementById('moviePartySection');
+    const movieVideo = document.getElementById('movieVideo');
+    const movieStatus = document.getElementById('movieStatus');
+    
+    if (moviePartySection) moviePartySection.style.display = 'block';
+    if (movieVideo) movieVideo.style.display = 'block';
+    if (movieStatus) movieStatus.style.display = 'block';
+  }
+
+  connectToProgressiveStream(magnetURI) {
+    this.cleanupVideo();
+
+    const torrent = this.client.add(magnetURI, {
+      strategy: 'sequential', // Critical for streaming
+      priority: 1
+    });
+
+    // Start progressive streaming as soon as we have ANY data
+    torrent.on('metadata', () => {
+      console.log('📥 Metadata received - starting progressive stream immediately');
+      this.startProgressiveStreaming(torrent);
+    });
+
+    // Fallback: Start even without full metadata if taking too long
+    setTimeout(() => {
+      if (!this.isVideoStreaming && torrent.files && torrent.files.length > 0) {
+        console.log('🔄 Fallback: Starting progressive stream with available data');
+        this.startProgressiveStreaming(torrent);
+      }
+    }, 2000);
+
+    torrent.on('error', (err) => {
+      console.error('⚠️ Torrent error:', err);
+      this.showStatus('Connection failed. Retrying...', true);
+    });
+  }
+
+  isVideoFile(filename) {
+    const videoExtensions = [
+      'mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'wmv', 'flv', 
+      '3gp', 'ogv', 'mpg', 'mpeg', 'ts', 'divx', 'xvid'
+    ];
+    const extension = filename.toLowerCase().split('.').pop();
+    return videoExtensions.includes(extension);
+  }
+
+  startProgressiveStreaming(torrent) {
+    if (this.isVideoStreaming) return;
+
+    const videoFile = torrent.files.find(file => this.isVideoFile(file.name));
+    
+    if (!videoFile) {
+      this.showStatus('No video file found in torrent');
+      return;
+    }
+
+    console.log('🎬 Starting PROGRESSIVE streaming for:', videoFile.name);
+    
+    // CRITICAL: Select file and set highest priority
+    videoFile.select();
+    videoFile.priority = 1;
+    
+    this.isVideoStreaming = true;
+    this.currentTorrent = torrent;
+    
+    this.showStatus('🎬 Building progressive stream...');
+    
+    // Create PROGRESSIVE STREAM that builds as data comes in
+    this.createProgressiveStream(videoFile, torrent);
+  }
+
+  createProgressiveStream(videoFile, torrent) {
+    console.log('🚀 Creating progressive stream - will update as data arrives');
+    
+    // PROGRESSIVE STREAMING APPROACH
+    this.progressiveStream = {
+      chunks: [],
+      totalSize: 0,
+      lastUpdateTime: 0,
+      updateInterval: null
+    };
+    
+    // Start building stream immediately with whatever data is available
+    this.updateProgressiveStream(videoFile);
+    
+    // Set up periodic updates as more data becomes available
+    this.progressiveStream.updateInterval = setInterval(() => {
+      this.updateProgressiveStream(videoFile);
+    }, 2000); // Update every 2 seconds with new data
+    
+    // Monitor download progress for better UX
+    torrent.on('download', () => {
+      this.updateDownloadProgress(torrent);
+    });
+  }
+
+  updateProgressiveStream(videoFile) {
     try {
-      const data = JSON.parse(msg);
-      console.log('Received message:', data);
-
-      switch(data.type) {
-        case 'join':
-          roomId = data.roomId;
-          name = data.name;
-          
-          // Get existing participants before adding new one
-          const existingParticipants = (rooms[roomId] || [])
-            .map(client => client.userName)
-            .filter(userName => userName); // Filter out undefined names
-          
-          rooms[roomId] = rooms[roomId] || [];
-          
-          // Store the user name on the WebSocket connection
-          ws.userName = name;
-          
-          rooms[roomId].push(ws);
-          
-          console.log(`${name} joined room ${roomId}. Room now has ${rooms[roomId].length} participants.`);
-          console.log('Existing participants:', existingParticipants);
-
-          // Send existing participants to the new joiner
-          existingParticipants.forEach(existingName => {
-            ws.send(JSON.stringify({ 
-              type: 'existing-peer', 
-              name: existingName 
-            }));
-          });
-
-          // Check if there's an active movie party and send it to the new joiner
-          const currentMovie = videoStates[roomId];
-          if (currentMovie && currentMovie.magnetURI) {
-            console.log(`🎬 Sending current movie party state to ${name}`);
-            
-            // Calculate the current playback position for late joiners
-            let currentTime = currentMovie.currentTime || 0;
-            if (currentMovie.isPlaying && currentMovie.lastUpdateTime) {
-              const timeSinceUpdate = (Date.now() - currentMovie.lastUpdateTime) / 1000;
-              currentTime += timeSinceUpdate;
-            }
-            
-            // Send the video info first
-            ws.send(JSON.stringify({
-              type: 'video-uploaded',
-              magnetURI: currentMovie.magnetURI,
-              fileName: currentMovie.fileName,
-              host: currentMovie.host
-            }));
-            
-            // Send the current synchronized state
-            ws.send(JSON.stringify({
-              type: 'late-joiner-sync',
-              isPlaying: currentMovie.isPlaying,
-              currentTime: currentTime,
-              timestamp: Date.now()
-            }));
-          }
-
-          // Notify ALL participants (including existing ones) about the new peer
-          // This ensures everyone knows about everyone else
-          rooms[roomId].forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'new-peer', name }));
-            }
-          });
-          
-          // Also send a signal to trigger cross-connections between existing peers
-          if (existingParticipants.length >= 2) {
-            // When C joins and A,B already exist, make sure B knows about A (and vice versa)
-            existingParticipants.forEach(peer1 => {
-              existingParticipants.forEach(peer2 => {
-                if (peer1 !== peer2) {
-                  const client1 = rooms[roomId].find(c => c.userName === peer1);
-                  if (client1 && client1.readyState === WebSocket.OPEN) {
-                    client1.send(JSON.stringify({
-                      type: 'refresh-peer',
-                      name: peer2
-                    }));
-                  }
-                }
-              });
-            });
-          }
-          break;
-
-        case 'signal':
-          console.log(`Forwarding WebRTC signal from ${name} in room ${roomId}`);
-          if (data.to) {
-            // Targeted signal to specific peer
-            const targetClient = rooms[roomId]?.find(client => client.userName === data.to);
-            if (targetClient && targetClient.readyState === WebSocket.OPEN) {
-              targetClient.send(JSON.stringify({
-                type: 'signal',
-                from: name,
-                signal: data.signal,
-              }));
-            } else {
-              console.log(`Target peer ${data.to} not found or not connected`);
-            }
-          } else {
-            // Broadcast to all peers (fallback)
-            (rooms[roomId] || []).forEach(client => {
-              if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({
-                  type: 'signal',
-                  from: name,
-                  signal: data.signal,
-                }));
-              }
-            });
-          }
-          break;
-
-        case 'emoji':
-          console.log(`${name} sent emoji: ${data.emoji}`);
-          (rooms[roomId] || []).forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: 'emoji',
-                from: name,
-                emoji: data.emoji,
-              }));
-            }
-          });
-          break;
-          
-        case 'mic-status':
-          console.log(`${name} mic status: ${data.muted ? 'muted' : 'unmuted'}`);
-          (rooms[roomId] || []).forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: 'mic-status',
-                name: name,
-                muted: data.muted,
-              }));
-            }
-          });
-          break;
-
-        // Movie Party Controls (WebTorrent-based)
-        case 'video-uploaded':
-          console.log(`🎬 ${name} started WebTorrent movie party in room ${roomId}`);
-          
-          // Store video state for WebTorrent
-          videoStates[roomId] = {
-            magnetURI: data.magnetURI,
-            fileName: data.fileName,
-            isPlaying: false,
-            currentTime: 0,
-            host: name,
-            uploadTime: Date.now(),
-            lastUpdateTime: Date.now()
-          };
-
-          // Notify all other participants
-          (rooms[roomId] || []).forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: 'video-uploaded',
-                magnetURI: data.magnetURI,
-                fileName: data.fileName,
-                host: name
-              }));
-            }
-          });
-          break;
-        case 'movie-play':
-          console.log(`▶️ ${name} played video in room ${roomId}`);
-          if (videoStates[roomId] && videoStates[roomId].host === name) {
-            videoStates[roomId].isPlaying = true;
-            videoStates[roomId].currentTime = data.currentTime || 0;
-            videoStates[roomId].lastUpdateTime = Date.now();
-            
-            (rooms[roomId] || []).forEach(client => {
-              if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({
-                  type: 'movie-play',
-                  currentTime: data.currentTime,
-                  timestamp: Date.now()
-                }));
-              }
-            });
-          }
-          break;
-
-        case 'movie-pause':
-          console.log(`⏸️ ${name} paused video in room ${roomId}`);
-          if (videoStates[roomId] && videoStates[roomId].host === name) {
-            videoStates[roomId].isPlaying = false;
-            videoStates[roomId].currentTime = data.currentTime || 0;
-            videoStates[roomId].lastUpdateTime = Date.now();
-            
-            (rooms[roomId] || []).forEach(client => {
-              if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({
-                  type: 'movie-pause',
-                  currentTime: data.currentTime,
-                  timestamp: Date.now()
-                }));
-              }
-            });
-          }
-          break;
-
-        case 'movie-seek':
-          console.log(`⏩ ${name} seeked video to ${data.currentTime}s in room ${roomId}`);
-          if (videoStates[roomId] && videoStates[roomId].host === name) {
-            videoStates[roomId].currentTime = data.currentTime || 0;
-            videoStates[roomId].lastUpdateTime = Date.now();
-            
-            (rooms[roomId] || []).forEach(client => {
-              if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({
-                  type: 'movie-seek',
-                  currentTime: data.currentTime,
-                  timestamp: Date.now()
-                }));
-              }
-            });
-          }
-          break;
-
-        case 'movie-audio-state':
-          console.log(`🎬 Movie audio state change in room ${roomId}: ${data.isPlaying ? 'playing' : 'stopped'} by ${data.host}`);
-          (rooms[roomId] || []).forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: 'movie-audio-state',
-                isPlaying: data.isPlaying,
-                host: data.host
-              }));
-            }
-          });
-          break;
-
-        case 'peer-status':
-          console.log(`👥 Peer ${name} status: ${data.status} in room ${roomId}`);
-          (rooms[roomId] || []).forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: 'peer-status',
-                user: name,
-                status: data.status
-              }));
-            }
-          });
-          break;
-
-        case 'request-video-state':
-          console.log(`🔄 Video state requested by ${name} in room ${roomId}`);
-          if (videoStates[roomId]) {
-            const currentState = videoStates[roomId];
-            let adjustedCurrentTime = currentState.currentTime;
-            if (currentState.isPlaying && currentState.lastUpdateTime) {
-              const timeSinceUpdate = (Date.now() - currentState.lastUpdateTime) / 1000;
-              adjustedCurrentTime = currentState.currentTime + timeSinceUpdate;
-            }
-            
-            ws.send(JSON.stringify({
-              type: 'video-state-sync',
-              hasVideo: true,
-              magnetURI: currentState.magnetURI,
-              fileName: currentState.fileName,
-              isPlaying: currentState.isPlaying,
-              currentTime: adjustedCurrentTime,
-              host: currentState.host
-            }));
-          } else {
-            ws.send(JSON.stringify({
-              type: 'video-state-sync',
-              hasVideo: false,
-              magnetURI: null,
-              fileName: null,
-              isPlaying: false,
-              currentTime: 0,
-              host: null
-            }));
-          }
-          break;
-
-        case 'stop-movie-party':
-          console.log(`🛑 Host ${name} stopped movie party in room ${roomId}`);
-          if (videoStates[roomId] && videoStates[roomId].host === name) {
-            delete videoStates[roomId];
-            
-            // Notify all participants
-            (rooms[roomId] || []).forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({
-                  type: 'movie-party-ended',
-                  host: name,
-                  message: 'Movie party has ended'
-                }));
-              }
-            });
-          }
-          break;
+      // Get currently downloaded data
+      const downloadedBytes = Math.min(
+        videoFile.downloaded || 0, 
+        videoFile.length * 0.1 // Start with 10% for initial playback
+      );
+      
+      if (downloadedBytes > this.progressiveStream.totalSize) {
+        console.log(`📥 Progressive update: ${Math.round(downloadedBytes / 1024 / 1024)}MB available`);
+        
+        // Create stream with available data
+        const startByte = 0;
+        const endByte = Math.min(downloadedBytes, videoFile.length) - 1;
+        
+        if (endByte > startByte) {
+          this.createStreamFromRange(videoFile, startByte, endByte);
+        }
+        
+        this.progressiveStream.totalSize = downloadedBytes;
       }
     } catch (error) {
-      console.error('Error processing message:', error);
+      console.error('Error updating progressive stream:', error);
+      // Fallback to simple blob URL after a delay
+      setTimeout(() => this.fallbackToSimpleStream(videoFile), 3000);
     }
-  });
+  }
 
-  // ✅ Proper disconnect handler
-  ws.on('close', () => {
-    if (rooms[roomId] && name) {
-      console.log(`${name} left room ${roomId}`);
-      
-      // Check if the leaving user was hosting a movie party
-      const currentMovie = videoStates[roomId];
-      if (currentMovie && currentMovie.host === name) {
-        console.log(`🛑 Movie party host ${name} left room ${roomId}, ending movie party`);
-        delete videoStates[roomId];
+  createStreamFromRange(videoFile, startByte, endByte) {
+    // Create a stream from the available byte range
+    const stream = videoFile.createReadStream({ 
+      start: startByte, 
+      end: endByte 
+    });
+    
+    const chunks = [];
+    
+    stream.on('data', (chunk) => {
+      chunks.push(chunk);
+    });
+    
+    stream.on('end', () => {
+      if (chunks.length > 0) {
+        // Create blob with available data
+        const blob = new Blob(chunks, { type: this.getVideoMimeType(videoFile.name) });
+        const url = URL.createObjectURL(blob);
         
-        // Notify remaining participants that movie party ended
-        rooms[roomId].forEach(client => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({
-              type: 'movie-party-ended',
-              host: name,
-              message: 'Movie party ended - host left the room'
-            }));
-          }
-        });
+        // Update video source
+        this.updateVideoSource(url);
+      }
+    });
+    
+    stream.on('error', (err) => {
+      console.warn('Stream creation error:', err);
+      // Try fallback approach
+      this.fallbackToSimpleStream(videoFile);
+    });
+  }
+
+  updateVideoSource(url) {
+    // Clean up previous blob
+    if (this.videoElement.src && this.videoElement.src.startsWith('blob:')) {
+      URL.revokeObjectURL(this.videoElement.src);
+    }
+    
+    // Save current playback state
+    const currentTime = this.videoElement.currentTime || 0;
+    const wasPlaying = !this.videoElement.paused;
+    
+    // Update source
+    this.videoElement.src = url;
+    
+    // Restore playback state after load
+    this.videoElement.addEventListener('loadedmetadata', () => {
+      if (currentTime > 0) {
+        this.videoElement.currentTime = currentTime;
       }
       
-      rooms[roomId] = rooms[roomId].filter(c => c !== ws);
-      rooms[roomId].forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({
-            type: 'peer-left',
-            name
-          }));
+      this.setupVideoControls();
+      
+      if (wasPlaying || currentTime === 0) {
+        this.videoElement.play().then(() => {
+          console.log('🎬 Progressive streaming playing');
+          this.hideStatus();
+        }).catch(error => {
+          console.log('Need user interaction to play');
+          if (this.isHost) this.showPlayButton();
+        });
+      }
+    }, { once: true });
+  }
+
+  fallbackToSimpleStream(videoFile) {
+    console.log('🔄 Falling back to simple streaming');
+    
+    // Clear progressive stream
+    if (this.progressiveStream && this.progressiveStream.updateInterval) {
+      clearInterval(this.progressiveStream.updateInterval);
+    }
+    
+    // Use simple getBlobURL - will stream as data becomes available
+    videoFile.getBlobURL((err, url) => {
+      if (err) {
+        console.error('Error getting blob URL:', err);
+        this.showStatus('Video loading failed', true);
+        return;
+      }
+      
+      this.videoElement.src = url;
+      this.setupVideoControls();
+      this.setupVideoPlayback();
+    });
+  }
+
+  updateDownloadProgress(torrent) {
+    const progress = Math.round(torrent.progress * 100);
+    const downloaded = Math.round(torrent.downloaded / 1024 / 1024);
+    const total = Math.round(torrent.length / 1024 / 1024);
+    
+    // Only show progress, don't block playback
+    if (progress < 100 && progress % 10 === 0) { // Every 10%
+      console.log(`📥 Download progress: ${progress}% (${downloaded}MB / ${total}MB)`);
+    }
+  }
+
+  getVideoMimeType(filename) {
+    const extension = filename.toLowerCase().split('.').pop();
+    const mimeTypes = {
+      'mp4': 'video/mp4',
+      'mkv': 'video/x-matroska',
+      'avi': 'video/x-msvideo',
+      'mov': 'video/quicktime',
+      'webm': 'video/webm',
+      'm4v': 'video/x-m4v',
+      'wmv': 'video/x-ms-wmv',
+      'flv': 'video/x-flv',
+      '3gp': 'video/3gpp',
+      'ogv': 'video/ogg',
+      'mpg': 'video/mpeg',
+      'mpeg': 'video/mpeg'
+    };
+    
+    return mimeTypes[extension] || 'video/mp4';
+  }
+
+  setupVideoControls() {
+    // CRITICAL: Only host gets controls
+    if (this.isHost) {
+      console.log('🎮 HOST: Enabling video controls');
+      this.videoElement.controls = true;
+      this.videoElement.setAttribute('controls', 'true');
+    } else {
+      console.log('👥 PARTICIPANT: Disabling video controls (sync mode)');
+      this.videoElement.controls = false;
+      this.videoElement.removeAttribute('controls');
+      
+      // Add participant-only controls
+      this.addParticipantControls();
+      
+      // Prevent any interaction with video
+      this.videoElement.style.pointerEvents = 'none';
+    }
+  }
+
+  addParticipantControls() {
+    // Remove existing controls
+    const existing = this.videoElement.parentElement?.querySelector('.participant-controls');
+    if (existing) existing.remove();
+    
+    const controlBar = document.createElement('div');
+    controlBar.className = 'participant-controls';
+    controlBar.style.cssText = `
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 8px 12px;
+      border-radius: 8px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s;
+    `;
+    
+    // Volume control
+    const volumeContainer = document.createElement('div');
+    volumeContainer.style.cssText = 'display: flex; align-items: center; gap: 5px;';
+    
+    const volumeIcon = document.createElement('span');
+    volumeIcon.textContent = '🔊';
+    volumeIcon.style.fontSize = '16px';
+    
+    const volumeSlider = document.createElement('input');
+    volumeSlider.type = 'range';
+    volumeSlider.min = '0';
+    volumeSlider.max = '1';
+    volumeSlider.step = '0.1';
+    volumeSlider.value = this.videoElement.volume || '1';
+    volumeSlider.style.cssText = 'width: 80px; height: 4px;';
+    
+    volumeSlider.addEventListener('input', (e) => {
+      this.videoElement.volume = e.target.value;
+      volumeIcon.textContent = e.target.value == 0 ? '🔇' : '🔊';
+    });
+    
+    volumeContainer.appendChild(volumeIcon);
+    volumeContainer.appendChild(volumeSlider);
+    
+    // Fullscreen button
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.textContent = '⛶';
+    fullscreenBtn.style.cssText = `
+      background: none;
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+    `;
+    
+    fullscreenBtn.addEventListener('click', () => {
+      if (this.videoElement.requestFullscreen) {
+        this.videoElement.requestFullscreen();
+      } else if (this.videoElement.webkitRequestFullscreen) {
+        this.videoElement.webkitRequestFullscreen();
+      }
+    });
+    
+    controlBar.appendChild(volumeContainer);
+    controlBar.appendChild(fullscreenBtn);
+    
+    // Add to video container
+    const videoContainer = this.videoElement.parentElement;
+    videoContainer.style.position = 'relative';
+    videoContainer.appendChild(controlBar);
+    
+    // Show/hide on hover
+    let hoverTimeout;
+    videoContainer.addEventListener('mouseenter', () => {
+      clearTimeout(hoverTimeout);
+      controlBar.style.opacity = '1';
+    });
+    
+    videoContainer.addEventListener('mouseleave', () => {
+      hoverTimeout = setTimeout(() => {
+        controlBar.style.opacity = '0';
+      }, 2000);
+    });
+  }
+
+  setupVideoPlayback() {
+    this.videoElement.addEventListener('loadedmetadata', () => {
+      console.log('📺 Progressive video metadata loaded');
+      this.hideStatus();
+      
+      // Handle subtitles
+      this.handleSubtitles();
+    }, { once: true });
+
+    this.videoElement.addEventListener('canplay', () => {
+      console.log('✅ Progressive video ready to play');
+      if (!this.isHost) {
+        // Participants wait for host signals
+        this.showStatus('👥 Syncing with host...');
+      }
+    }, { once: true });
+
+    // Auto-play handling
+    const playPromise = this.videoElement.play();
+    
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          console.log('🎬 Progressive video started playing');
+          if (this.isHost) {
+            this.hideStatus();
+          }
+        })
+        .catch((error) => {
+          console.log('ℹ️ Autoplay blocked:', error.message);
+          if (this.isHost) {
+            this.showPlayButton();
+          }
+        });
+    }
+  }
+
+  showPlayButton() {
+    const playButton = document.createElement('button');
+    playButton.textContent = '▶️ Start Movie Party';
+    playButton.style.cssText = `
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 15px 30px;
+      background: linear-gradient(45deg, #007bff, #0056b3);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 18px;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+    
+    playButton.onclick = () => {
+      this.videoElement.play();
+      playButton.remove();
+      this.hideStatus();
+    };
+    
+    this.videoElement.parentElement.style.position = 'relative';
+    this.videoElement.parentElement.appendChild(playButton);
+  }
+
+  setupVideoEvents() {
+    if (this.isHost) {
+      // HOST: Send sync signals to participants
+      this.videoElement.addEventListener('play', () => {
+        if (!this.syncInProgress) {
+          console.log('🎬 HOST: Sending PLAY signal');
+          window.sendMovieSignal('movie-play', { 
+            currentTime: this.videoElement.currentTime 
+          });
         }
       });
       
-      // Clean up empty rooms
-      if (rooms[roomId].length === 0) {
-        delete rooms[roomId];
-        console.log(`Room ${roomId} deleted (empty)`);
-      }
+      this.videoElement.addEventListener('pause', () => {
+        if (!this.syncInProgress) {
+          console.log('🎬 HOST: Sending PAUSE signal');
+          window.sendMovieSignal('movie-pause', { 
+            currentTime: this.videoElement.currentTime 
+          });
+        }
+      });
+      
+      this.videoElement.addEventListener('seeked', () => {
+        if (!this.syncInProgress) {
+          console.log('🎬 HOST: Sending SEEK signal');
+          window.sendMovieSignal('movie-seek', { 
+            currentTime: this.videoElement.currentTime 
+          });
+        }
+      });
+      
+      // Send periodic sync for late joiners
+      setInterval(() => {
+        if (this.isVideoStreaming && !this.videoElement.paused) {
+          window.sendMovieSignal('sync-check', {
+            currentTime: this.videoElement.currentTime,
+            isPlaying: !this.videoElement.paused
+          });
+        }
+      }, 5000);
+      
+    } else {
+      // PARTICIPANT: Receive and apply sync signals
+      window.handleMoviePlay = (data) => {
+        console.log('👥 PARTICIPANT: Received PLAY signal:', data.currentTime);
+        this.applySyncAction(() => {
+          this.videoElement.currentTime = data.currentTime;
+          this.videoElement.play();
+          this.hideStatus();
+        });
+      };
+      
+      window.handleMoviePause = (data) => {
+        console.log('👥 PARTICIPANT: Received PAUSE signal:', data.currentTime);
+        this.applySyncAction(() => {
+          this.videoElement.currentTime = data.currentTime;
+          this.videoElement.pause();
+        });
+      };
+      
+      window.handleMovieSeek = (data) => {
+        console.log('👥 PARTICIPANT: Received SEEK signal:', data.currentTime);
+        this.applySyncAction(() => {
+          this.videoElement.currentTime = data.currentTime;
+        });
+      };
+      
+      window.handleSyncCheck = (data) => {
+        // Silent sync check for drift correction
+        const timeDiff = Math.abs(this.videoElement.currentTime - data.currentTime);
+        if (timeDiff > 2) { // More than 2 seconds drift
+          console.log('👥 PARTICIPANT: Correcting drift:', timeDiff, 'seconds');
+          this.applySyncAction(() => {
+            this.videoElement.currentTime = data.currentTime;
+            if (data.isPlaying && this.videoElement.paused) {
+              this.videoElement.play();
+            } else if (!data.isPlaying && !this.videoElement.paused) {
+              this.videoElement.pause();
+            }
+          });
+        }
+      };
+      
+      window.handleLateJoinerSync = (data) => {
+        console.log('👥 PARTICIPANT: Late joiner sync:', data);
+        this.applySyncAction(() => {
+          this.videoElement.currentTime = data.currentTime;
+          if (data.isPlaying) {
+            this.videoElement.play();
+            this.hideStatus();
+          } else {
+            this.videoElement.pause();
+          }
+        });
+      };
     }
-  });
+  }
 
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-  });
-});
+  applySyncAction(action) {
+    // Prevent sync conflicts
+    this.syncInProgress = true;
+    action();
+    setTimeout(() => {
+      this.syncInProgress = false;
+    }, 1000);
+  }
 
-// Start the server
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🎬 Enhanced WebTorrent Server running on http://0.0.0.0:${PORT}`);
-  console.log(`🌐 WebTorrent peer-to-peer movie streaming enabled`);
-});
+  handleSubtitles() {
+    if (!this.currentTorrent) return;
+    
+    const subtitleFile = this.currentTorrent.files.find(file => 
+      /\.(vtt|srt|ass|ssa|sub)$/i.test(file.name)
+    );
+    
+    if (subtitleFile) {
+      subtitleFile.getBlobURL((err, url) => {
+        if (!err) {
+          // Create subtitle track
+          const track = document.createElement('track');
+          track.kind = 'subtitles';
+          track.label = 'English';
+          track.srclang = 'en';
+          track.src = url;
+          track.default = true;
+          
+          this.videoElement.appendChild(track);
+          console.log('📝 Subtitles loaded');
+        }
+      });
+    }
+  }
 
-// Simple health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Voice Meet Server with WebTorrent Support' });
-});
+  cleanupVideo() {
+    if (this.videoElement) {
+      this.videoElement.pause();
+      if (this.videoElement.src && this.videoElement.src.startsWith('blob:')) {
+        URL.revokeObjectURL(this.videoElement.src);
+      }
+      this.videoElement.src = '';
+      this.videoElement.load();
+      
+      // Remove participant controls
+      const controlBar = this.videoElement.parentElement?.querySelector('.participant-controls');
+      if (controlBar) controlBar.remove();
+    }
+    
+    // Cleanup progressive stream
+    if (this.progressiveStream && this.progressiveStream.updateInterval) {
+      clearInterval(this.progressiveStream.updateInterval);
+    }
+    this.progressiveStream = null;
+    
+    this.isVideoStreaming = false;
+    this.currentTorrent = null;
+  }
 
-// Optional fallback endpoint for non-WebTorrent users (if needed)
-app.get('/fallback/:roomId/:fileName', (req, res) => {
-  res.status(404).json({ 
-    error: 'Fallback streaming not implemented. Use WebTorrent for movie party.' 
-  });
-});
+  destroy() {
+    console.log('🧹 Destroying MoviePartyPlayer...');
+    
+    if (this.isHost && this.userName && window.sendMovieSignal) {
+      window.sendMovieSignal('stop-movie-party', {
+        host: this.userName
+      });
+    }
+    
+    this.cleanupVideo();
+    
+    if (this.client) {
+      this.client.destroy();
+      this.client = null;
+    }
+    
+    // Cleanup global handlers
+    window.handleVideoUploaded = null;
+    window.handleMoviePlay = null;
+    window.handleMoviePause = null;
+    window.handleMovieSeek = null;
+    window.handleSyncCheck = null;
+    window.handleLateJoinerSync = null;
+    
+    console.log('✅ MoviePartyPlayer destroyed');
+  }
+}
