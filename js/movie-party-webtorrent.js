@@ -301,14 +301,42 @@ class MoviePartyPlayer {
           this.handleSourceBufferUpdate();
         });
         
+        this.sourceBuffer.addEventListener('error', (error) => {
+          console.warn('⚠️ SourceBuffer error, falling back to blob streaming:', error);
+          this.fallbackToBlobStreaming(videoFile);
+        });
+        
         // Start downloading chunks
         this.startChunkedDownload(videoFile);
         
       } catch (error) {
         console.warn('⚠️ MediaSource not compatible, falling back to blob streaming:', error);
-        this.setupBlobStreaming(videoFile);
+        this.fallbackToBlobStreaming(videoFile);
       }
     });
+
+    this.mediaSource.addEventListener('error', (error) => {
+      console.warn('⚠️ MediaSource error, falling back to blob streaming:', error);
+      this.fallbackToBlobStreaming(videoFile);
+    });
+  }
+
+  fallbackToBlobStreaming(videoFile) {
+    console.log('🔄 Switching to blob streaming mode...');
+    
+    // Clean up MediaSource
+    this.sourceBuffer = null;
+    if (this.mediaSource) {
+      try {
+        this.mediaSource.endOfStream();
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      this.mediaSource = null;
+    }
+    
+    // Switch to blob streaming
+    this.setupBlobStreaming(videoFile);
   }
 
   setupBlobStreaming(videoFile) {
@@ -521,12 +549,26 @@ class MoviePartyPlayer {
   }
 
   appendToSourceBuffer(chunk) {
-    if (this.sourceBuffer && !this.sourceBuffer.updating) {
-      try {
-        // MediaSource API requires ArrayBuffer, convert Uint8Array to ArrayBuffer
-        const arrayBuffer = chunk instanceof Uint8Array ? chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) : chunk;
-        this.sourceBuffer.appendBuffer(arrayBuffer);
-      } catch (error) {
+    // Only try to append if MediaSource streaming is still active and valid
+    if (!this.sourceBuffer || !this.mediaSource || this.mediaSource.readyState !== 'open') {
+      return; // Silently skip if MediaSource is not available
+    }
+    
+    if (this.sourceBuffer.updating) {
+      return; // Skip if currently updating
+    }
+    
+    try {
+      // MediaSource API requires ArrayBuffer, convert Uint8Array to ArrayBuffer
+      const arrayBuffer = chunk instanceof Uint8Array ? 
+        chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) : 
+        chunk;
+      this.sourceBuffer.appendBuffer(arrayBuffer);
+    } catch (error) {
+      if (error.name === 'InvalidStateError') {
+        console.warn('⚠️ SourceBuffer in invalid state, switching to blob streaming');
+        this.fallbackToBlobStreaming(this.videoFile);
+      } else {
         console.warn('⚠️ Could not append to source buffer:', error);
       }
     }
