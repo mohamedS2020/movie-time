@@ -465,7 +465,7 @@ class MoviePartyPlayer {
       this.videoElement.src = url;
       this.videoElement.controls = this.isHost;
       
-      console.log('🎬 STREAMING BLOB READY - Starting playback');
+      console.log(`🎬 STREAMING BLOB READY - Starting playback (Host: ${this.isHost}, Controls: ${this.videoElement.controls})`);
       this.startVideoPlayback();
       
       // Setup continuous blob updates
@@ -635,6 +635,15 @@ class MoviePartyPlayer {
     // Setup participant controls if needed
     if (!this.isHost) {
       this.setupParticipantControls();
+      
+      // Ensure controls stay disabled for participants
+      setInterval(() => {
+        if (this.videoElement.controls && !this.isHost) {
+          console.log('⚠️ Fixing participant controls - disabling native controls');
+          this.videoElement.controls = false;
+          this.videoElement.setAttribute('controls', 'false');
+        }
+      }, 1000);
     }
   }
 
@@ -746,14 +755,17 @@ class MoviePartyPlayer {
     }
 
     window.handleMoviePlay = (data) => {
+      console.log('🎬 Participant received PLAY signal:', data, 'Current time:', this.videoElement.currentTime);
       video.currentTime = data.currentTime;
       video.play();
     };
     window.handleMoviePause = (data) => {
+      console.log('🎬 Participant received PAUSE signal:', data, 'Current time:', this.videoElement.currentTime);
       video.currentTime = data.currentTime;
       video.pause();
     };
     window.handleMovieSeek = (data) => {
+      console.log('🎬 Participant received SEEK signal:', data, 'Current time:', this.videoElement.currentTime);
       video.currentTime = data.currentTime;
     };
     window.handleLateJoinerSync = (data) => {
@@ -781,9 +793,11 @@ class MoviePartyPlayer {
   }
 
   setupParticipantControls() {
-    console.log('🎬 Setting up participant controls...');
+    console.log('🎬 Setting up participant controls (disabling main video controls)...');
     
+    // CRITICAL: Disable native video controls for participants
     this.videoElement.controls = false;
+    this.videoElement.setAttribute('controls', 'false');
     
     const controlBar = document.createElement('div');
     controlBar.className = 'participant-controls';
@@ -799,6 +813,7 @@ class MoviePartyPlayer {
       align-items: center;
       opacity: 0;
       transition: opacity 0.3s;
+      z-index: 1000;
     `;
     
     const volumeControl = document.createElement('input');
