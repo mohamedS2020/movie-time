@@ -346,7 +346,14 @@ class MoviePartyPlayer {
     
     stream.on('end', () => {
       if (chunkBuffer.length > 0) {
-        const chunk = Buffer.concat(chunkBuffer);
+        // Browser-compatible: concatenate Uint8Arrays instead of using Buffer
+        const totalLength = chunkBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+        const chunk = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const buffer of chunkBuffer) {
+          chunk.set(buffer, offset);
+          offset += buffer.length;
+        }
         this.streamingBuffer.push(chunk);
         this.bufferSize += chunk.length;
         this.downloadOffset = end + 1;
@@ -516,7 +523,9 @@ class MoviePartyPlayer {
   appendToSourceBuffer(chunk) {
     if (this.sourceBuffer && !this.sourceBuffer.updating) {
       try {
-        this.sourceBuffer.appendBuffer(chunk);
+        // MediaSource API requires ArrayBuffer, convert Uint8Array to ArrayBuffer
+        const arrayBuffer = chunk instanceof Uint8Array ? chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) : chunk;
+        this.sourceBuffer.appendBuffer(arrayBuffer);
       } catch (error) {
         console.warn('⚠️ Could not append to source buffer:', error);
       }
