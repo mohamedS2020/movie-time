@@ -1,4 +1,4 @@
-// movie-party-webtorrent-optimized.js - INSTANT 10-MINUTE STREAMING
+// movie-party-webtorrent-streaming.js - TRUE CONTINUOUS STREAMING
 
 class MoviePartyPlayer {
   constructor({ videoElementId = 'movieVideo', fileInputId = 'movieFileInput', statusDisplayId = 'movieStatus' }) {
@@ -14,17 +14,18 @@ class MoviePartyPlayer {
 
     console.log('✅ WebTorrent loaded, initializing MoviePartyPlayer...');
     
-    // OPTIMIZED: Create WebTorrent client with streaming-first settings
+    // STREAMING-OPTIMIZED: Create WebTorrent client with live streaming settings
     this.client = new WebTorrent({
       tracker: {
         announce: [
           'wss://tracker.openwebtorrent.com',
           'wss://tracker.btorrent.xyz',
           'wss://tracker.webtorrent.io',
-          'wss://tracker.btorrent.xyz'
+          'wss://tracker.files.fm',
+          'wss://tracker.novage.com.ua'
         ]
       },
-      maxConns: 100,
+      maxConns: 200,
       downloadLimit: -1,
       uploadLimit: -1,
       dht: true,
@@ -47,9 +48,20 @@ class MoviePartyPlayer {
     this.peersStatus = {};
     this.isVideoStreaming = false;
     this.currentTorrent = null;
-    this.streamingChunks = [];
+    
+    // STREAMING STATE
+    this.streamingBuffer = [];
+    this.bufferSize = 0;
     this.isBuffering = false;
-    this.playbackStartTime = 0;
+    this.downloadOffset = 0;
+    this.playbackOffset = 0;
+    this.chunkSize = 2 * 1024 * 1024; // 2MB chunks for smooth streaming
+    this.bufferTarget = 30 * 1024 * 1024; // Keep 30MB buffer ahead
+    this.minBufferSize = 5 * 1024 * 1024; // Start playing with 5MB
+    this.isStreamingActive = false;
+    this.mediaSource = null;
+    this.sourceBuffer = null;
+    this.videoFile = null;
 
     this.setupSubtitles();
     this.initialize();
@@ -108,23 +120,25 @@ class MoviePartyPlayer {
       const file = event.target.files[0];
       if (!file) return;
 
-      this.showStatus('🚀 Creating instant 10-minute stream...');
+      this.showStatus('🚀 Starting live streaming...');
 
       const seedOptions = {
         announceList: [
           ['wss://tracker.openwebtorrent.com'],
           ['wss://tracker.btorrent.xyz'],
-          ['wss://tracker.webtorrent.io']
+          ['wss://tracker.webtorrent.io'],
+          ['wss://tracker.files.fm'],
+          ['wss://tracker.novage.com.ua']
         ],
         strategy: 'sequential',
         private: false
       };
 
       this.client.seed(file, seedOptions, (torrent) => {
-        console.log('🎬 Torrent seeded for 10-minute instant streaming:', torrent.magnetURI);
+        console.log('🎬 Torrent seeded for live streaming:', torrent.magnetURI);
         
-        // IMMEDIATELY start 10-minute streaming for host
-        this.streamFirst10Minutes(torrent);
+        // IMMEDIATELY start continuous streaming for host
+        this.startContinuousStreaming(torrent);
         
         // Notify participants
         window.sendMovieSignal('video-uploaded', {
@@ -143,11 +157,11 @@ class MoviePartyPlayer {
     window.handleVideoUploaded = (data) => {
       const { magnetURI, fileName, fileSize } = data;
       
-      this.showStatus('⚡ Connecting to 10-minute instant stream...');
+      this.showStatus('⚡ Connecting to live stream...');
       this.showMoviePartyUI();
       
-      // OPTIMIZED: Connect with 10-minute streaming priority
-      this.connectToFirst10Minutes(magnetURI, fileName, fileSize);
+      // CONNECT to continuous streaming
+      this.connectToContinuousStream(magnetURI, fileName, fileSize);
     };
   }
 
@@ -161,14 +175,14 @@ class MoviePartyPlayer {
     if (movieStatus) movieStatus.style.display = 'block';
   }
 
-  connectToFirst10Minutes(magnetURI, fileName, fileSize) {
+  connectToContinuousStream(magnetURI, fileName, fileSize) {
     try {
       const infoHash = magnetURI.match(/xt=urn:btih:([a-fA-F0-9]{40})/)?.[1];
       if (infoHash) {
         const existingTorrent = this.client.torrents.find(t => t.infoHash === infoHash);
         if (existingTorrent) {
-          console.log('🔄 Using existing torrent for 10-minute streaming');
-          this.streamFirst10Minutes(existingTorrent);
+          console.log('🔄 Using existing torrent for streaming');
+          this.startContinuousStreaming(existingTorrent);
           return;
         }
       }
@@ -178,21 +192,22 @@ class MoviePartyPlayer {
       const torrent = this.client.add(magnetURI, {
         strategy: 'sequential',
         priority: 1,
-        maxWebConns: 20,
+        maxWebConns: 50,
         verify: false
       });
 
       torrent.on('metadata', () => {
-        console.log('🚀 Metadata received, starting 10-minute instant stream...');
-        this.streamFirst10Minutes(torrent);
+        console.log('🚀 Metadata received, starting continuous stream...');
+        this.startContinuousStreaming(torrent);
       });
 
+      // Fallback for slow metadata
       setTimeout(() => {
         if (!this.isVideoStreaming && torrent.files.length > 0) {
-          console.log('🔄 Fallback: Starting 10-minute stream with available data...');
-          this.streamFirst10Minutes(torrent);
+          console.log('🔄 Fallback: Starting stream with available data...');
+          this.startContinuousStreaming(torrent);
         }
-      }, 5000);
+      }, 3000);
 
       torrent.on('error', (err) => {
         console.error('⚠️ Torrent error:', err);
@@ -205,143 +220,349 @@ class MoviePartyPlayer {
     }
   }
 
-  streamFirst10Minutes(torrent) {
+  // SUPPORTED VIDEO FORMATS - Much more comprehensive
+  isVideoFile(filename) {
+    const videoExtensions = [
+      // Common formats
+      'mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'wmv', 'flv', '3gp', 'ogv', 'ogg',
+      // Less common but supported
+      'mpg', 'mpeg', 'mpe', 'mp2', 'm2v', 'm4p', 'f4v', 'asf', 'vob', 'ts', 'm2ts',
+      'mts', 'divx', 'xvid', 'rm', 'rmvb', 'amv', 'qt', 'dv', 'nsv', 'dat'
+    ];
+    
+    const extension = filename.toLowerCase().split('.').pop();
+    return videoExtensions.includes(extension);
+  }
+
+  startContinuousStreaming(torrent) {
     if (this.isVideoStreaming) {
       console.log('📺 Already streaming, skipping...');
       return;
     }
 
-    console.log('🚀 STARTING 10-MINUTE INSTANT STREAMING');
+    console.log('🚀 STARTING CONTINUOUS LIVE STREAMING');
     
-    const videoFile = torrent.files.find(file => 
-      /\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|3gp|ogg|ogv)$/i.test(file.name)
-    );
+    // Find video file with expanded format support
+    const videoFile = torrent.files.find(file => this.isVideoFile(file.name));
     
     if (!videoFile) {
-      console.error('❌ No video file found in torrent');
-      this.showStatus('No video file found in torrent');
+      console.error('❌ No supported video file found in torrent');
+      this.showStatus('No supported video file found in torrent');
       return;
     }
 
-    console.log('🎬 Found video file:', videoFile.name);
+    console.log('🎬 Found video file:', videoFile.name, `(${Math.round(videoFile.length / 1024 / 1024)}MB)`);
+    
+    // CRITICAL: Set highest priority and select file
     videoFile.select();
     videoFile.priority = 1;
     
     this.isVideoStreaming = true;
     this.currentTorrent = torrent;
+    this.videoFile = videoFile;
     
-    // CRITICAL: Download first 10 minutes instantly
-    this.downloadAndPlayFirst10Minutes(videoFile, torrent);
+    // Reset streaming state
+    this.streamingBuffer = [];
+    this.bufferSize = 0;
+    this.downloadOffset = 0;
+    this.playbackOffset = 0;
+    this.isStreamingActive = false;
+    
+    // START TRUE CONTINUOUS STREAMING
+    this.initializeContinuousStream(videoFile);
   }
 
-  downloadAndPlayFirst10Minutes(videoFile, torrent) {
-    this.showStatus('🎬 Downloading first 10 minutes...');
+  initializeContinuousStream(videoFile) {
+    this.showStatus('🎬 Buffering for instant playback...');
     
-    // ESTIMATE: Assume ~10MB per minute for decent quality (adjust as needed)
-    const estimatedBitrateKbps = 1000; // 1 Mbps
-    const tenMinutesInSeconds = 600;
-    const estimatedFirst10MinutesSize = (estimatedBitrateKbps * tenMinutesInSeconds * 1024) / 8; // Convert to bytes
+    // Try MediaSource API for true streaming (works with more formats)
+    if (window.MediaSource && MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E,mp4a.40.2"')) {
+      console.log('🔧 Using MediaSource API for advanced streaming');
+      this.setupMediaSourceStreaming(videoFile);
+    } else {
+      console.log('🔧 Using blob streaming for compatibility');
+      this.setupBlobStreaming(videoFile);
+    }
+  }
+
+  setupMediaSourceStreaming(videoFile) {
+    this.mediaSource = new MediaSource();
+    this.videoElement.src = URL.createObjectURL(this.mediaSource);
     
-    // CRITICAL: Don't exceed 30% of file size for first chunk
-    const maxFirstChunkSize = Math.min(estimatedFirst10MinutesSize, videoFile.length * 0.3);
-    const firstChunkSize = Math.min(maxFirstChunkSize, 100 * 1024 * 1024); // Max 100MB
-    
-    console.log(`📥 Downloading first chunk: ${Math.round(firstChunkSize / 1024 / 1024)}MB (~10 minutes)`);
-    
-    this.streamingChunks = [];
-    let downloadedBytes = 0;
-    let hasStartedPlayback = false;
-    
-    // PROGRESSIVE DOWNLOAD: Start with smaller chunks for instant playback
-    const chunkSize = 1024 * 1024; // 1MB chunks
-    const minPlaybackSize = 50 * 1024 * 1024; // Start playback after 5MB
-    
-    const downloadChunk = (start, end) => {
-      if (start >= firstChunkSize) {
-        console.log('✅ First 10 minutes downloaded, starting background download...');
-        this.startBackgroundDownload(videoFile, firstChunkSize);
-        return;
-      }
+    this.mediaSource.addEventListener('sourceopen', () => {
+      console.log('📺 MediaSource opened');
       
-      const actualEnd = Math.min(end, firstChunkSize);
-      
-      videoFile.createReadStream({ start, end: actualEnd })
-        .on('data', (chunk) => {
-          this.streamingChunks.push(chunk);
-          downloadedBytes += chunk.length;
-          
-          // UPDATE PROGRESS
-          const progress = (downloadedBytes / firstChunkSize * 100).toFixed(1);
-          this.showStatus(`📥 Buffering: ${progress}% (~${Math.round(downloadedBytes / 1024 / 1024)}MB)`);
-          
-          // START PLAYBACK when we have enough data
-          if (!hasStartedPlayback && downloadedBytes >= minPlaybackSize) {
-            hasStartedPlayback = true;
-            console.log('🎬 Starting playback with partial data...');
-            this.createInstantPlaybackBlob();
-          }
-        })
-        .on('end', () => {
-          // Download next chunk
-          setTimeout(() => downloadChunk(actualEnd + 1, actualEnd + chunkSize), 50);
-        })
-        .on('error', (err) => {
-          console.error('❌ Error downloading chunk:', err);
-          this.showStatus('Download error. Retrying...', true);
+      // Try to add source buffer
+      try {
+        this.sourceBuffer = this.mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E,mp4a.40.2"');
+        this.sourceBuffer.mode = 'sequence';
+        
+        this.sourceBuffer.addEventListener('updateend', () => {
+          this.handleSourceBufferUpdate();
         });
+        
+        // Start downloading chunks
+        this.startChunkedDownload(videoFile);
+        
+      } catch (error) {
+        console.warn('⚠️ MediaSource not compatible, falling back to blob streaming:', error);
+        this.setupBlobStreaming(videoFile);
+      }
+    });
+  }
+
+  setupBlobStreaming(videoFile) {
+    console.log('🔧 Setting up blob-based continuous streaming');
+    this.startChunkedDownload(videoFile);
+  }
+
+  startChunkedDownload(videoFile) {
+    console.log('📥 Starting chunked download...');
+    this.isStreamingActive = true;
+    
+    // Download first chunk immediately
+    this.downloadNextChunk(videoFile);
+    
+    // Setup continuous downloading
+    this.setupContinuousDownloader(videoFile);
+  }
+
+  downloadNextChunk(videoFile) {
+    if (!this.isStreamingActive || this.downloadOffset >= videoFile.length) {
+      return;
+    }
+    
+    const start = this.downloadOffset;
+    const end = Math.min(start + this.chunkSize - 1, videoFile.length - 1);
+    
+    console.log(`📥 Downloading chunk: ${Math.round(start / 1024 / 1024)}MB - ${Math.round(end / 1024 / 1024)}MB`);
+    
+    const stream = videoFile.createReadStream({ start, end });
+    let chunkBuffer = [];
+    
+    stream.on('data', (data) => {
+      chunkBuffer.push(data);
+    });
+    
+    stream.on('end', () => {
+      if (chunkBuffer.length > 0) {
+        const chunk = Buffer.concat(chunkBuffer);
+        this.streamingBuffer.push(chunk);
+        this.bufferSize += chunk.length;
+        this.downloadOffset = end + 1;
+        
+        // Update progress
+        const progress = (this.downloadOffset / videoFile.length * 100).toFixed(1);
+        this.showStatus(`📥 Streaming: ${progress}% (${Math.round(this.bufferSize / 1024 / 1024)}MB buffered)`);
+        
+        // Check if we can start playback
+        if (!this.videoElement.src || this.videoElement.src.startsWith('blob:')) {
+          this.checkAndStartPlayback();
+        }
+        
+        // Handle MediaSource streaming
+        if (this.sourceBuffer && !this.sourceBuffer.updating) {
+          this.appendToSourceBuffer(chunk);
+        }
+      }
+    });
+    
+    stream.on('error', (err) => {
+      console.error('❌ Chunk download error:', err);
+      // Retry after a short delay
+      setTimeout(() => this.downloadNextChunk(videoFile), 1000);
+    });
+  }
+
+  setupContinuousDownloader(videoFile) {
+    // Continuously download chunks to stay ahead of playback
+    const downloadLoop = () => {
+      if (!this.isStreamingActive) return;
+      
+      // Calculate how much buffer we have ahead of current playback
+      const currentTime = this.videoElement.currentTime || 0;
+      const duration = this.videoElement.duration || 1;
+      const currentPosition = (currentTime / duration) * videoFile.length;
+      const bufferAhead = this.downloadOffset - currentPosition;
+      
+      // Download more if buffer is running low
+      if (bufferAhead < this.bufferTarget && this.downloadOffset < videoFile.length) {
+        this.downloadNextChunk(videoFile);
+        
+        // Download next chunk quickly if buffer is critically low
+        const delay = bufferAhead < this.minBufferSize ? 100 : 500;
+        setTimeout(downloadLoop, delay);
+      } else {
+        // Check again later
+        setTimeout(downloadLoop, 2000);
+      }
     };
     
-    // Start downloading first chunk
-    downloadChunk(0, chunkSize);
+    // Start the download loop
+    setTimeout(downloadLoop, 1000);
   }
 
-  createInstantPlaybackBlob() {
+  checkAndStartPlayback() {
+    // Start playback once we have minimum buffer
+    if (this.bufferSize >= this.minBufferSize && !this.videoElement.src.startsWith('blob:')) {
+      console.log('🎬 Minimum buffer reached, starting playback...');
+      this.createStreamingBlob();
+    }
+    
+    // Update blob periodically for continuous playback
+    if (this.videoElement.src.startsWith('blob:')) {
+      this.updateStreamingBlob();
+    }
+  }
+
+  createStreamingBlob() {
     try {
-      // Create blob from downloaded chunks
-      const blob = new Blob(this.streamingChunks, { type: 'video/mp4' });
+      // Create blob from current buffer
+      const blob = new Blob(this.streamingBuffer, { type: this.getVideoMimeType() });
       const url = URL.createObjectURL(blob);
       
-      // Set video source
+      // Clean up old blob
+      if (this.videoElement.src.startsWith('blob:')) {
+        URL.revokeObjectURL(this.videoElement.src);
+      }
+      
+      // Set new blob as video source
       this.videoElement.src = url;
       this.videoElement.controls = this.isHost;
       
-      console.log('🎬 INSTANT PLAYBACK READY - Video source set');
+      console.log('🎬 STREAMING BLOB READY - Starting playback');
+      this.startVideoPlayback();
       
-      // CRITICAL: Start playback immediately
-      this.startInstantVideoPlayback();
-      
-      // Setup seamless transition to full video
-      this.setupSeamlessTransition();
+      // Setup continuous blob updates
+      this.setupBlobUpdates();
       
     } catch (error) {
-      console.error('❌ Error creating instant playback blob:', error);
+      console.error('❌ Error creating streaming blob:', error);
       this.showStatus('Playback error. Please try again.', true);
     }
   }
 
-  startInstantVideoPlayback() {
+  getVideoMimeType() {
+    if (!this.videoFile) return 'video/mp4';
+    
+    const extension = this.videoFile.name.toLowerCase().split('.').pop();
+    const mimeTypes = {
+      'mp4': 'video/mp4',
+      'mkv': 'video/x-matroska',
+      'avi': 'video/x-msvideo',
+      'mov': 'video/quicktime',
+      'webm': 'video/webm',
+      'm4v': 'video/x-m4v',
+      'wmv': 'video/x-ms-wmv',
+      'flv': 'video/x-flv',
+      '3gp': 'video/3gpp',
+      'ogv': 'video/ogg',
+      'mpg': 'video/mpeg',
+      'mpeg': 'video/mpeg'
+    };
+    
+    return mimeTypes[extension] || 'video/mp4';
+  }
+
+  setupBlobUpdates() {
+    // Update blob every few seconds with new data
+    const updateInterval = setInterval(() => {
+      if (!this.isStreamingActive) {
+        clearInterval(updateInterval);
+        return;
+      }
+      
+      // Only update if we have new data
+      if (this.streamingBuffer.length > 0) {
+        this.updateStreamingBlob();
+      }
+    }, 3000); // Update every 3 seconds
+  }
+
+  updateStreamingBlob() {
+    if (this.streamingBuffer.length === 0) return;
+    
+    try {
+      // Create updated blob with all downloaded data
+      const blob = new Blob(this.streamingBuffer, { type: this.getVideoMimeType() });
+      const url = URL.createObjectURL(blob);
+      
+      // Save current state
+      const currentTime = this.videoElement.currentTime;
+      const wasPlaying = !this.videoElement.paused;
+      
+      // Update source (this might cause a brief flicker but ensures continuous playback)
+      const oldSrc = this.videoElement.src;
+      this.videoElement.src = url;
+      
+      // Restore playback state
+      this.videoElement.addEventListener('loadedmetadata', () => {
+        this.videoElement.currentTime = currentTime;
+        if (wasPlaying) {
+          this.videoElement.play();
+        }
+      }, { once: true });
+      
+      // Clean up old blob
+      if (oldSrc.startsWith('blob:')) {
+        setTimeout(() => URL.revokeObjectURL(oldSrc), 1000);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error updating streaming blob:', error);
+    }
+  }
+
+  appendToSourceBuffer(chunk) {
+    if (this.sourceBuffer && !this.sourceBuffer.updating) {
+      try {
+        this.sourceBuffer.appendBuffer(chunk);
+      } catch (error) {
+        console.warn('⚠️ Could not append to source buffer:', error);
+      }
+    }
+  }
+
+  handleSourceBufferUpdate() {
+    // Continue downloading after source buffer update
+    if (this.downloadOffset < this.videoFile.length) {
+      setTimeout(() => this.downloadNextChunk(this.videoFile), 100);
+    }
+  }
+
+  startVideoPlayback() {
     this.hideStatus();
     
     this.videoElement.addEventListener('loadedmetadata', () => {
-      console.log('📺 Instant video metadata loaded');
-      this.showStatus('🎬 Ready to play first 10 minutes!');
+      console.log('📺 Streaming video metadata loaded');
+      this.showStatus('🎬 Ready to stream!');
+      
+      // Handle subtitles
+      this.handleSubtitles(this.currentTorrent);
     }, { once: true });
 
     this.videoElement.addEventListener('canplay', () => {
-      console.log('✅ Instant video ready to play');
+      console.log('✅ Streaming video ready to play');
       this.hideStatus();
     }, { once: true });
 
-    // Handle when approaching end of first 10 minutes
+    // Monitor buffer health
     this.videoElement.addEventListener('timeupdate', () => {
-      const currentTime = this.videoElement.currentTime;
-      const duration = this.videoElement.duration;
-      
-      // When approaching end of 10-minute buffer (at 8 minutes)
-      if (currentTime > duration * 0.8 && !this.isBuffering) {
-        this.isBuffering = true;
-        this.showStatus('📥 Loading next part...');
-        console.log('⚠️ Approaching end of 10-minute buffer, need to load more...');
+      this.monitorStreamingHealth();
+    });
+
+    // Handle waiting/buffering
+    this.videoElement.addEventListener('waiting', () => {
+      console.log('⚠️ Video waiting for more data...');
+      this.showStatus('📥 Buffering...');
+      this.isBuffering = true;
+    });
+
+    this.videoElement.addEventListener('playing', () => {
+      if (this.isBuffering) {
+        console.log('✅ Video resumed playing');
+        this.hideStatus();
+        this.isBuffering = false;
       }
     });
 
@@ -351,7 +572,7 @@ class MoviePartyPlayer {
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
-          console.log('🎬 INSTANT 10-MINUTE PLAYBACK STARTED');
+          console.log('🎬 CONTINUOUS STREAMING STARTED');
           this.hideStatus();
         })
         .catch((error) => {
@@ -366,11 +587,33 @@ class MoviePartyPlayer {
     }
   }
 
+  monitorStreamingHealth() {
+    if (!this.isStreamingActive || !this.videoFile) return;
+    
+    const currentTime = this.videoElement.currentTime || 0;
+    const duration = this.videoElement.duration || 1;
+    
+    // Calculate current position in file
+    const currentPosition = (currentTime / duration) * this.videoFile.length;
+    const bufferAhead = this.downloadOffset - currentPosition;
+    const percentDownloaded = (this.downloadOffset / this.videoFile.length * 100).toFixed(1);
+    
+    // Log streaming health
+    if (Math.floor(currentTime) % 10 === 0) { // Every 10 seconds
+      console.log(`📊 Stream Health: ${percentDownloaded}% downloaded, ${Math.round(bufferAhead / 1024 / 1024)}MB ahead`);
+    }
+    
+    // Show buffering if running low
+    if (bufferAhead < this.minBufferSize / 2 && !this.isBuffering) {
+      this.showStatus('📥 Downloading ahead...');
+    }
+  }
+
   showPlayButton() {
-    this.showStatus('Click play to start the movie! 🎬');
+    this.showStatus('Click play to start streaming! 🎬');
     
     const playButton = document.createElement('button');
-    playButton.textContent = '▶️ Play First 10 Minutes';
+    playButton.textContent = '▶️ Start Streaming';
     playButton.style.cssText = `
       padding: 15px 30px;
       background: linear-gradient(45deg, #007bff, #0056b3);
@@ -394,81 +637,6 @@ class MoviePartyPlayer {
     }
   }
 
-  startBackgroundDownload(videoFile, startFrom) {
-    console.log('📥 Starting background download for remaining video...');
-    
-    // Download remaining file in background
-    const remainingSize = videoFile.length - startFrom;
-    const backgroundChunkSize = 5 * 1024 * 1024; // 5MB chunks for background
-    
-    const downloadBackground = (start, end) => {
-      if (start >= videoFile.length) {
-        console.log('✅ Full video downloaded in background');
-        this.transitionToFullVideo(videoFile);
-        return;
-      }
-      
-      const actualEnd = Math.min(end, videoFile.length);
-      
-      videoFile.createReadStream({ start, end: actualEnd })
-        .on('data', (chunk) => {
-          this.streamingChunks.push(chunk);
-        })
-        .on('end', () => {
-          // Download next background chunk
-          setTimeout(() => downloadBackground(actualEnd + 1, actualEnd + backgroundChunkSize), 100);
-        })
-        .on('error', (err) => {
-          console.error('❌ Background download error:', err);
-        });
-    };
-    
-    // Start background download
-    downloadBackground(startFrom, startFrom + backgroundChunkSize);
-  }
-
-  transitionToFullVideo(videoFile) {
-    console.log('🔄 Transitioning to full video...');
-    
-    // Create full video blob
-    const fullBlob = new Blob(this.streamingChunks, { type: 'video/mp4' });
-    const fullUrl = URL.createObjectURL(fullBlob);
-    
-    // Save current playback position
-    const currentTime = this.videoElement.currentTime;
-    const wasPlaying = !this.videoElement.paused;
-    
-    // Seamlessly switch to full video
-    this.videoElement.src = fullUrl;
-    this.videoElement.currentTime = currentTime;
-    
-    if (wasPlaying) {
-      this.videoElement.play();
-    }
-    
-    console.log('✅ Seamless transition to full video complete');
-    this.isBuffering = false;
-    this.hideStatus();
-  }
-
-  setupSeamlessTransition() {
-    // Monitor for buffering issues
-    this.videoElement.addEventListener('waiting', () => {
-      if (!this.isBuffering) {
-        console.log('⚠️ Video waiting for more data...');
-        this.showStatus('📥 Buffering next part...');
-      }
-    });
-
-    this.videoElement.addEventListener('playing', () => {
-      if (this.isBuffering) {
-        console.log('✅ Video resumed playing');
-        this.hideStatus();
-        this.isBuffering = false;
-      }
-    });
-  }
-
   handleSubtitles(torrent) {
     const subtitleFile = torrent.files.find(file => 
       /\.(vtt|srt|ass|ssa|sub)$/i.test(file.name)
@@ -487,10 +655,10 @@ class MoviePartyPlayer {
   cleanupVideoElement() {
     if (this.videoElement) {
       this.videoElement.pause();
-      if (this.videoElement.src) {
+      if (this.videoElement.src && this.videoElement.src.startsWith('blob:')) {
         URL.revokeObjectURL(this.videoElement.src);
-        this.videoElement.src = '';
       }
+      this.videoElement.src = '';
       this.videoElement.load();
       
       const controlBar = this.videoElement.parentElement?.querySelector('.participant-controls');
@@ -499,13 +667,26 @@ class MoviePartyPlayer {
       }
     }
     
+    // Stop streaming
+    this.isStreamingActive = false;
     this.isVideoStreaming = false;
-    this.streamingChunks = [];
+    this.streamingBuffer = [];
+    this.bufferSize = 0;
+    this.downloadOffset = 0;
     this.isBuffering = false;
+    
+    // Cleanup MediaSource
+    if (this.mediaSource) {
+      try {
+        this.mediaSource.endOfStream();
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+      this.mediaSource = null;
+      this.sourceBuffer = null;
+    }
   }
 
-  // ... (rest of the methods remain the same: setupPlaybackSync, setupMobileSupport, etc.)
-  
   setupPlaybackSync(video) {
     if (this.isHost) {
       video.onplay = () => window.sendMovieSignal('movie-play', { currentTime: video.currentTime });
@@ -641,6 +822,9 @@ class MoviePartyPlayer {
       });
     }
     
+    // Stop streaming
+    this.isStreamingActive = false;
+    
     this.cleanupVideoElement();
     
     if (this.fileInput && this.handleFileChange) {
@@ -662,7 +846,9 @@ class MoviePartyPlayer {
     
     this.peersStatus = {};
     this.currentTorrent = null;
-    this.streamingChunks = [];
+    this.streamingBuffer = [];
+    this.videoFile = null;
+    
     console.log('✅ MoviePartyPlayer destroyed');
   }
 }
